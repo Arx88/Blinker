@@ -285,7 +285,19 @@ def install_mise(os_type):
             print_color("Mise installed. Update your PATH or restart terminal if 'mise' not found.", Colors.WARNING)
             os.environ["PATH"] = os.path.expanduser("~/.local/bin") + os.pathsep + os.environ["PATH"]
         elif os_type == "windows":
-            run_command(["winget", "install", "-e", "--id", "jdx.mise"])
+            winget_result = run_command(["winget", "install", "-e", "--id", "jdx.mise"], check=False)
+            print_color("Verifying Mise installation path using 'where mise'...", Colors.OKBLUE)
+            where_result = run_command(["where", "mise"], check=False, capture_output_default=True, text_default=True)
+            if where_result.returncode == 0 and where_result.stdout and where_result.stdout.strip():
+                found_path = where_result.stdout.strip().splitlines()[0]  # Take the first path if multiple
+                print_color(f"Mise executable found via 'where mise' at: {found_path}. Considering Mise available.", Colors.OKGREEN)
+                return True  # Mise is found, consider installation successful
+            else:
+                print_color("'where mise' did not find Mise.", Colors.WARNING)
+                if winget_result.returncode != 0:
+                    print_color(f"Winget installation also reported an issue (exit code: {winget_result.returncode}).", Colors.WARNING)
+                    if winget_result.stderr:
+                         print_color(f"Winget stderr: {winget_result.stderr.strip()}", Colors.WARNING)
         else:
             print_color(f"Mise auto-install not supported for OS: {os_type}", Colors.FAIL)
             return False
