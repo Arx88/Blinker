@@ -458,7 +458,7 @@ def main():
         print_color("Python dependencies installation complete.", Colors.OKGREEN)
 
         print_color("\nInstalling frontend Node.js dependencies from frontend/package.json. This can also take some time...", Colors.OKBLUE)
-        run_command([npm_executable_path, "install", "--prefix", "frontend"], stream_output=True, cwd=".")
+        run_command([npm_executable_path, "install"], stream_output=True, cwd="frontend")
         print_color("Frontend dependencies installation complete.", Colors.OKGREEN)
 
         if global_config.get("SETUP_MODE") == "local":
