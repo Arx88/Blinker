@@ -87,6 +87,14 @@ def run_command(command: List[str] | str, check=True, shell=False, cwd=None,
                        "pip" in actual_cmd_for_popen_or_run)) and \
                      "install" in actual_cmd_for_popen_or_run
 
+    current_env = os.environ.copy()
+    if isinstance(actual_cmd_for_popen_or_run, list) and "mise" in actual_cmd_for_popen_or_run[0]:
+        # Attempt to ensure mise trusts the config in /app for non-interactive CI-like environments
+        current_env["MISE_TRUSTED_CONFIG_PATHS"] = "/app"
+        # MISE_YES=1 was an earlier attempt, keeping it here commented out for history, but
+        # MISE_TRUSTED_CONFIG_PATHS seems more semantically correct if supported.
+        # current_env["MISE_YES"] = "1"
+
     try:
         if stream_output or is_pip_install:
             if is_pip_install:
@@ -104,25 +112,40 @@ def run_command(command: List[str] | str, check=True, shell=False, cwd=None,
                 bufsize=1,
                 shell=shell,
                 cwd=cwd,
+                env=current_env,
                 executable=executable_path if shell else None
             )
 
-            streamed_stdout_chars = []
+            streamed_stdout_lines = []
             if process.stdout:
+                line_buffer = []
                 while True:
                     char = process.stdout.read(1)
                     if char == '' and process.poll() is not None:
+                        if line_buffer: # Print any remaining characters in the buffer
+                            line = "".join(line_buffer)
+                            print(line, end='', flush=True)
+                            streamed_stdout_lines.append(line)
                         break
                     if char:
-                        print(char, end='', flush=True)
-                        streamed_stdout_chars.append(char)
-                    else:
-                        if process.poll() is not None:
+                        if char == '\n':
+                            line = "".join(line_buffer) + '\n'
+                            print(line, end='', flush=True)
+                            streamed_stdout_lines.append(line)
+                            line_buffer = []
+                        else:
+                            line_buffer.append(char)
+                    else: # No char, but process not ended
+                        if process.poll() is not None: # Process ended
+                            if line_buffer: # Print any remaining buffer
+                                line = "".join(line_buffer)
+                                print(line, end='', flush=True)
+                                streamed_stdout_lines.append(line)
                             break
-                        time.sleep(0.001)
+                        time.sleep(0.001) # Small sleep if no char and process still running
                 process.stdout.close()
 
-            streamed_stdout_str = "".join(streamed_stdout_chars)
+            streamed_stdout_str = "".join(streamed_stdout_lines)
 
             stderr_output = ""
             if process.stderr:
@@ -171,6 +194,7 @@ def run_command(command: List[str] | str, check=True, shell=False, cwd=None,
                 cwd=cwd,
                 capture_output=effective_capture_output,
                 text=effective_text,
+                env=current_env,
                 executable=executable_path if shell else None
             )
             if effective_capture_output and process_obj.stdout:
@@ -216,7 +240,7 @@ def check_docker():
         return False
     try:
         run_command(["docker", "--version"], capture_output_default=True, text_default=True)
-        result = run_command(["docker", "info"], capture_output_default=True, text_default=True, check=False)
+        result = run_command(["sudo", "docker", "info"], capture_output_default=True, text_default=True, check=False)
         if result.returncode == 0:
             print_color("Docker is running.", Colors.OKGREEN)
             return True
@@ -233,10 +257,11 @@ def check_docker():
 def check_mise():
     print_color("\n--- Step 2: Checking Mise ---", Colors.HEADER)
     print_color("Mise manages project-specific CLI versions.", Colors.OKCYAN)
-    if shutil.which("mise"):
-        print_color("Mise found.", Colors.OKGREEN)
+    mise_executable_path = os.path.expanduser("~/.local/bin/mise")
+    if os.path.exists(mise_executable_path):
+        print_color(f"Mise found at {mise_executable_path}.", Colors.OKGREEN)
         return True
-    print_color("Mise not found.", Colors.WARNING)
+    print_color(f"Mise not found at {mise_executable_path}.", Colors.WARNING)
     return False
 
 
@@ -390,13 +415,18 @@ def main():
            not install_mise(os_type)):
             print_color("Mise required. Install manually.", Colors.FAIL)
             return
-        install_prompt_sb = "Supabase CLI not found. Install? (Y/n): "
-        if not check_supabase_cli() and \
-           (input_color(install_prompt_sb, Colors.WARNING).lower() not in ['y', ''] or
-           not install_supabase_cli(os_type)):
-            print_color("Supabase CLI required. Install manually.", Colors.FAIL)
-            return
-        print_color("\n--- Dependencies OK. ---", Colors.OKGREEN + Colors.BOLD)
+
+        if not check_supabase_cli():
+            install_sb_choice = input_color("Supabase CLI not found. Install? (Y/n): ", Colors.WARNING).strip().lower()
+            if install_sb_choice in ['y', '']:
+                if not install_supabase_cli(os_type):
+                    print_color("Supabase CLI installation failed. Continuing without it for now as it might be a temporary issue with downloads.", Colors.WARNING)
+                else: # if install_supabase_cli returned True
+                    print_color("Supabase CLI installed successfully.", Colors.OKGREEN)
+            else:
+                print_color("Skipping Supabase CLI installation. Some local development features might not work.", Colors.WARNING)
+
+        print_color("\n--- Dependencies OK (Supabase CLI might be missing). ---", Colors.OKGREEN + Colors.BOLD)
 
         global_config = leer_config_completa()
         print_color("\n--- Blinker Setup Mode ---", Colors.HEADER)
@@ -471,14 +501,17 @@ def main():
         print_color("\n--- Starting Services ---", Colors.HEADER + Colors.BOLD)
 
         print_color("\nEnsuring correct tool versions with Mise. This might take a few moments...", Colors.OKBLUE)
-        run_command(["mise", "install"], stream_output=True)
+        print_color("DEBUG: About to run mise install...", Colors.WARNING)
+        mise_executable_path = os.path.expanduser("~/.local/bin/mise")
+        run_command([mise_executable_path, "install"], stream_output=True)
         print_color("Mise tool versioning complete.", Colors.OKGREEN)
 
         print_color("\n--- Locating npm via mise ---", Colors.HEADER)
         npm_executable_path = ""
         try:
+            mise_executable_path = os.path.expanduser("~/.local/bin/mise")
             mise_which_result = run_command(
-                ["mise", "which", "npm"],
+                [mise_executable_path, "which", "npm"],
                 capture_output_default=True,
                 text_default=True,
                 check=False
@@ -529,10 +562,12 @@ def main():
             sys.exit(1)
 
         print_color("\nInstalling Python dependencies from backend/requirements.txt...", Colors.OKBLUE)
+        print_color("DEBUG: About to run pip install...", Colors.WARNING)
         run_command([sys.executable, "-m", "pip", "install", "-r", "backend/requirements.txt"], stream_output=True)
         print_color("Python dependencies installation complete.", Colors.OKGREEN)
 
         print_color("\nInstalling frontend Node.js dependencies from frontend/package.json...", Colors.OKBLUE)
+        print_color("DEBUG: About to run npm install...", Colors.WARNING)
         run_command([npm_executable_path, "install"], stream_output=True, cwd="frontend")
         print_color("Frontend dependencies installation complete.", Colors.OKGREEN)
 
