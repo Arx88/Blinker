@@ -8,7 +8,8 @@ import shutil
 import time
 import re
 import sys
-from typing import Optional, Dict, List, Any # Added for type hints
+from typing import Optional, Dict, List, Any
+import shlex # For safely splitting commands for Popen if shell=True and command is a string
 
 CONFIG_FILE = ".blinker_config"
 
@@ -36,92 +37,79 @@ def input_color(prompt_text, color_code=Colors.OKCYAN, input_color_code=Colors.E
     return input()
 
 def _parse_pip_error_for_failed_packages(stderr_output: str) -> List[str]:
-    """Parses pip stderr output to find names of packages that failed to install."""
     failed_packages = set()
-    # Regex for "Could not find a version that satisfies the requirement" and "No matching distribution found for"
-    # This pattern tries to capture the package name, which might include extras like 'package[extra]'
-    # It looks for the package name following the specific pip error phrases.
     patterns = [
         re.compile(r"Could not find a version that satisfies the requirement\s+([a-zA-Z0-9-_.]+\[?[a-zA-Z0-9-_.,]*]?|[a-zA-Z0-9-_.]+)"),
         re.compile(r"No matching distribution found for\s+([a-zA-Z0-9-_.]+\[?[a-zA-Z0-9-_.,]*]?|[a-zA-Z0-9-_.]+)"),
-        # More generic pattern if specific text not found but line contains "Could not find" / "No matching distribution"
-        # This is a fallback and might be less precise.
-        # re.compile(r"(?:Could not find|No matching distribution).*? for\s*([a-zA-Z0-9-_.]+\[?[a-zA-Z0-9-_.,]*]?|[a-zA-Z0-9-_.]+)")
     ]
     for line in stderr_output.splitlines():
-        # Try specific patterns first
-        found_specific = False
-        for pattern in patterns[:2]: # First two are more specific
+        for pattern in patterns:
             match = pattern.search(line)
             if match:
-                failed_packages.add(match.group(1).strip())
-                found_specific = True
-                break
-        # If specific patterns don't match, try a more general one if needed (commented out for now)
-        # if not found_specific and len(patterns) > 2:
-        #     match = patterns[2].search(line)
-        #     if match:
-        #         failed_packages.add(match.group(1).strip())
-
-    # A common way pip lists missing packages in summaries is "package1, package2, ... from project"
-    # This is a heuristic if the above don't catch structured errors well for some pip versions.
+                failed_packages.add(match.group(1).strip()); break
     summary_pattern = re.compile(r"The following required packages are not installed:\s*(.+)")
     summary_match = summary_pattern.search(stderr_output)
     if summary_match:
         pkgs_text = summary_match.group(1)
-        # Split by common delimiters like comma, space, 'and'
         potential_pkgs = re.split(r'[,\s]+(?:and\s+)?', pkgs_text)
         for pkg in potential_pkgs:
-            pkg_clean = pkg.strip().replace("'", "") # Remove quotes
-            if pkg_clean and not any(op in pkg_clean for op in ['<','>','=','!']): # Avoid version constraints
+            pkg_clean = pkg.strip().replace("'", "")
+            if pkg_clean and not any(op in pkg_clean for op in ['<','>','=','!']):
                 failed_packages.add(pkg_clean)
-
     return list(failed_packages)
 
+def run_command(command: List[str] | str, check=True, shell=False, cwd=None,
+                capture_output_default=False, text_default=False, stream_output=False):
 
-def run_command(command, check=True, shell=False, cwd=None, capture_output_default=False, text_default=False):
-    """Helper function to run a subprocess command with error handling and real-time output for pip install."""
+    cmd_to_log = ""
+    actual_cmd_for_popen_or_run = None
+    executable_path = None
 
-    # Prepare command_list and executable_path based on shell True/False
     if shell:
-        # For shell=True, Popen/run expect a string. executable is usually figured out by the shell,
-        # but can be specified (e.g. /bin/bash).
-        command_str = command if isinstance(command, str) else " ".join(command)
+        cmd_to_log = command if isinstance(command, str) else " ".join(command)
+        actual_cmd_for_popen_or_run = cmd_to_log # Popen/run with shell=True takes a string
         executable_path = "/bin/bash" if platform.system().lower() in ["linux", "darwin"] else None
-        cmd_to_log_and_popen = command_str
     else:
-        command_list = command if isinstance(command, list) else command.split()
-        executable_path = None # Not typically used when shell=False and command is a list.
-                               # First item in list is the executable.
-        cmd_to_log_and_popen = command_list
+        cmd_to_log_list = command if isinstance(command, list) else command.split()
+        cmd_to_log = " ".join(cmd_to_log_list)
+        actual_cmd_for_popen_or_run = cmd_to_log_list # Popen/run with shell=False takes a list
+        # executable_path is usually None when shell=False, as the first item in list is the executable
 
-    is_pip_install = isinstance(cmd_to_log_and_popen, list) and \
-                     (cmd_to_log_and_popen[0] == "pip" or \
-                      (cmd_to_log_and_popen[0] == sys.executable and "-m" in cmd_to_log_and_popen and "pip" in cmd_to_log_and_popen)) and \
-                     "install" in cmd_to_log_and_popen
+    is_pip_install = isinstance(actual_cmd_for_popen_or_run, list) and \
+                     (actual_cmd_for_popen_or_run[0] == "pip" or \
+                      (actual_cmd_for_popen_or_run[0] == sys.executable and "-m" in actual_cmd_for_popen_or_run and "pip" in actual_cmd_for_popen_or_run)) and \
+                     "install" in actual_cmd_for_popen_or_run
 
-    print_color(f"Executing: {' '.join(cmd_to_log_and_popen) if isinstance(cmd_to_log_and_popen, list) else cmd_to_log_and_popen}", Colors.OKBLUE)
+    print_color(f"Executing: {cmd_to_log}", Colors.OKBLUE)
 
     try:
-        if is_pip_install:
-            print_color("Streaming output for pip install...", Colors.OKCYAN)
-            # Ensure command for Popen is a list if not shell=True
-            popen_cmd = cmd_to_log_and_popen if not shell else shlex.split(cmd_to_log_and_popen) if platform.system() != "Windows" else cmd_to_log_and_popen
+        if stream_output or is_pip_install:
+            if is_pip_install:
+                print_color(f"Streaming output for pip install: {cmd_to_log}", Colors.OKCYAN)
+            elif stream_output:
+                print_color(f"Streaming output for: {cmd_to_log}", Colors.OKCYAN)
+
+            # Popen needs a list for command unless shell=True.
+            # If shell=True, actual_cmd_for_popen_or_run is already a string.
+            # If shell=False, actual_cmd_for_popen_or_run is already a list.
+            # shlex.split is mainly for converting a string command to a list for shell=False,
+            # or for shell=True if the command string has complex quoting not handled well by default.
+            # Given current logic, actual_cmd_for_popen_or_run should be correctly formatted.
 
             process = subprocess.Popen(
-                popen_cmd,
+                actual_cmd_for_popen_or_run,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                bufsize=1, # Line-buffered
-                shell=shell, # Use the passed shell value
+                bufsize=1,
+                shell=shell,
                 cwd=cwd,
-                executable=executable_path if shell else None # executable is for shell=True mostly
+                executable=executable_path if shell else None
             )
 
             if process.stdout:
                 for line in iter(process.stdout.readline, ''):
-                    print(line, end='') # Print line by line as it comes
+                    print(line, end='')
                 process.stdout.close()
 
             stderr_output = ""
@@ -132,37 +120,41 @@ def run_command(command, check=True, shell=False, cwd=None, capture_output_defau
             return_code = process.wait()
 
             if check and return_code != 0:
-                print_color(f"Command failed with exit code {return_code}", Colors.FAIL)
+                print_color(f"Command failed with exit code {return_code}: {cmd_to_log}", Colors.FAIL)
 
-                failed_packages = _parse_pip_error_for_failed_packages(stderr_output)
-                if failed_packages:
-                    print_color("--------------------------------------------------------------------", Colors.FAIL)
-                    print_color("ERROR: PIP INSTALLATION FAILED", Colors.FAIL + Colors.BOLD)
-                    print_color("--------------------------------------------------------------------", Colors.FAIL)
-                    print_color("The following package(s) seem to have caused issues:", Colors.WARNING)
-                    for pkg in failed_packages: print_color(f"  - {pkg}", Colors.WARNING)
-                    print_color("\nCommon reasons for pip install failures:", Colors.OKCYAN)
-                    print_color("  1. Misspelled package name in 'backend/requirements.txt'.", Colors.OKCYAN)
-                    print_color("  2. Package not available on PyPI (public repository) or version doesn't exist.", Colors.OKCYAN)
-                    print_color("  3. Package is private and requires special configuration (e.g., custom index URL, auth).", Colors.OKCYAN)
-                    print_color("  4. Version conflicts with other packages or your Python version.", Colors.OKCYAN)
-                    print_color("  5. Network issues preventing download from package indexes.", Colors.OKCYAN)
-                    print_color("  6. Missing system-level dependencies required by the package for compilation.", Colors.OKCYAN)
-                    print_color("\nPlease check 'backend/requirements.txt', package availability, and error messages below.", Colors.OKCYAN)
-                    if stderr_output: print_color(f"\nFull pip error output:\n{stderr_output.strip()}", Colors.FAIL)
-                    print_color("--------------------------------------------------------------------", Colors.FAIL)
-                elif stderr_output: # Not a recognized "package not found" error, but still a pip error
-                    print_color(f"Pip installation failed. Full error output:\n{stderr_output.strip()}", Colors.FAIL)
+                if is_pip_install: # Only do detailed pip parsing if it was a pip install command
+                    failed_packages = _parse_pip_error_for_failed_packages(stderr_output)
+                    if failed_packages:
+                        print_color("--------------------------------------------------------------------", Colors.FAIL)
+                        print_color("ERROR: PIP INSTALLATION FAILED", Colors.FAIL + Colors.BOLD)
+                        print_color("--------------------------------------------------------------------", Colors.FAIL)
+                        print_color("The following package(s) seem to have caused issues:", Colors.WARNING)
+                        for pkg in failed_packages: print_color(f"  - {pkg}", Colors.WARNING)
+                        print_color("\nCommon reasons for pip install failures:", Colors.OKCYAN)
+                        # ... (common reasons as before)
+                        print_color("  1. Misspelled package name in 'backend/requirements.txt'.", Colors.OKCYAN)
+                        print_color("  2. Package not available on PyPI (public repository) or version doesn't exist.", Colors.OKCYAN)
+                        print_color("  3. Package is private and requires special configuration (e.g., custom index URL, auth).", Colors.OKCYAN)
+                        print_color("  4. Version conflicts with other packages or your Python version.", Colors.OKCYAN)
+                        print_color("  5. Network issues preventing download from package indexes.", Colors.OKCYAN)
+                        print_color("  6. Missing system-level dependencies required by the package for compilation.", Colors.OKCYAN)
+                        print_color("\nPlease check 'backend/requirements.txt', package availability, and error messages below.", Colors.OKCYAN)
+                        if stderr_output: print_color(f"\nFull pip error output:\n{stderr_output.strip()}", Colors.FAIL)
+                        print_color("--------------------------------------------------------------------", Colors.FAIL)
+                    elif stderr_output:
+                        print_color(f"Pip installation failed. Full error output:\n{stderr_output.strip()}", Colors.FAIL)
+                elif stderr_output: # For non-pip streamed commands that failed
+                     print_color(f"Error output:\n{stderr_output.strip()}", Colors.FAIL)
 
-                raise subprocess.CalledProcessError(return_code, cmd_to_log_and_popen, output="<stdout streamed>", stderr=stderr_output)
+                raise subprocess.CalledProcessError(return_code, actual_cmd_for_popen_or_run, output="<stdout streamed>", stderr=stderr_output)
 
-            return subprocess.CompletedProcess(cmd_to_log_and_popen, return_code, stdout="<stdout streamed>", stderr=stderr_output)
+            return subprocess.CompletedProcess(actual_cmd_for_popen_or_run, return_code, stdout="<stdout streamed>", stderr=stderr_output)
 
-        else: # Original subprocess.run logic for non-pip-install commands
+        else:
             effective_capture_output = capture_output_default
             effective_text = text_default
-            process = subprocess.run(
-                cmd_to_log_and_popen,
+            process_obj = subprocess.run(
+                actual_cmd_for_popen_or_run,
                 check=False,
                 shell=shell,
                 cwd=cwd,
@@ -170,31 +162,26 @@ def run_command(command, check=True, shell=False, cwd=None, capture_output_defau
                 text=effective_text,
                 executable=executable_path if shell else None
             )
-            if effective_capture_output and process.stdout:
-                print_color(process.stdout, Colors.OKGREEN)
+            if effective_capture_output and process_obj.stdout:
+                print_color(process_obj.stdout, Colors.OKGREEN)
 
-            if check and process.returncode != 0:
-                print_color(f"Error executing command: {' '.join(cmd_to_log_and_popen) if isinstance(cmd_to_log_and_popen, list) else cmd_to_log_and_popen}", Colors.FAIL)
-                print_color(f"Return code: {process.returncode}", Colors.FAIL)
+            if check and process_obj.returncode != 0:
+                print_color(f"Error executing command: {cmd_to_log}", Colors.FAIL)
+                print_color(f"Return code: {process_obj.returncode}", Colors.FAIL)
                 if effective_capture_output:
-                    if process.stdout: print_color(f"Stdout (if any):\n{process.stdout.strip()}", Colors.FAIL)
-                    if process.stderr: print_color(f"Stderr:\n{process.stderr.strip()}", Colors.FAIL)
-                raise subprocess.CalledProcessError(process.returncode, cmd_to_log_and_popen, output=process.stdout, stderr=process.stderr)
-            return process
+                    if process_obj.stdout: print_color(f"Stdout (if any):\n{process_obj.stdout.strip()}", Colors.FAIL)
+                    if process_obj.stderr: print_color(f"Stderr:\n{process_obj.stderr.strip()}", Colors.FAIL)
+                # No detailed pip parsing here, as pip installs go through Popen path.
+                raise subprocess.CalledProcessError(process_obj.returncode, actual_cmd_for_popen_or_run, output=process_obj.stdout, stderr=process_obj.stderr)
+            return process_obj
 
     except FileNotFoundError:
-        cmd_name = cmd_to_log_and_popen[0] if isinstance(cmd_to_log_and_popen, list) else cmd_to_log_and_popen.split()[0]
+        cmd_name = actual_cmd_for_popen_or_run[0] if isinstance(actual_cmd_for_popen_or_run, list) and not shell else str(actual_cmd_for_popen_or_run).split()[0]
         print_color(f"Error: Command not found - {cmd_name}. Ensure it's installed and in PATH.", Colors.FAIL)
         raise
-    except Exception as e: # Catch any other unexpected error during command execution
-        print_color(f"An unexpected error occurred while trying to run command: {e}", Colors.FAIL)
+    except Exception as e:
+        print_color(f"An unexpected error occurred while trying to run command '{cmd_to_log}': {e}", Colors.FAIL)
         raise
-
-# ... (rest of the script remains the same, ensure shlex is imported if using it for Popen with shell=True)
-# import shlex # Add this if shlex.split is used for shell=True with Popen (safer for complex commands)
-# For now, the Popen part for shell=True passes the string command directly, which is typical.
-
-# ... (rest of the file from get_os() downwards) ...
 
 def get_os():
     system = platform.system().lower()
@@ -396,18 +383,37 @@ def main():
         print_color(".env generated.", Colors.OKGREEN)
 
         print_color("\n--- Starting Services ---", Colors.HEADER + Colors.BOLD)
-        print_color("Mise ensuring tool versions...", Colors.OKBLUE); run_command(["mise", "install"])
-        print_color("Installing Python deps...", Colors.OKBLUE); run_command([sys.executable, "-m", "pip", "install", "-r", "backend/requirements.txt"])
-        print_color("Installing Frontend deps...", Colors.OKBLUE); run_command(["npm", "install", "--prefix", "frontend"])
+
+        print_color("\nEnsuring correct tool versions with Mise. This might take a few moments if new versions need to be downloaded/installed...", Colors.OKBLUE)
+        run_command(["mise", "install"], stream_output=True)
+        print_color("Mise tool versioning complete.", Colors.OKGREEN)
+
+        print_color("\nInstalling Python dependencies from backend/requirements.txt. This may take several minutes depending on network speed and package complexity...", Colors.OKBLUE)
+        run_command([sys.executable, "-m", "pip", "install", "-r", "backend/requirements.txt"], stream_output=True)
+        print_color("Python dependencies installation complete.", Colors.OKGREEN)
+
+        print_color("\nInstalling frontend Node.js dependencies from frontend/package.json. This can also take some time...", Colors.OKBLUE)
+        run_command(["npm", "install", "--prefix", "frontend"], stream_output=True, cwd=".")
+        print_color("Frontend dependencies installation complete.", Colors.OKGREEN)
 
         if global_config.get("SETUP_MODE") == "local":
             print_color("\n--- Setting up Local Docker Env ---", Colors.HEADER)
-            print_color("Starting Supabase...", Colors.OKBLUE); run_command(["supabase", "start"])
-            print_color("Supabase started. Stabilizing...", Colors.OKBLUE); time.sleep(10)
-            print_color("Resetting DB & migrations...", Colors.OKBLUE); run_command(["supabase", "db", "reset", "--local"])
-            print_color("Starting Docker containers...", Colors.OKBLUE); run_command(["docker-compose", "up", "--build", "-d"])
-            print_color("Docker containers started.", Colors.OKGREEN)
-            print_color("\nMonitoring containers...", Colors.OKBLUE); time.sleep(5)
+
+            print_color("\nStarting local Supabase services. This may take a minute for the first time...", Colors.OKBLUE)
+            run_command(["supabase", "start"], stream_output=True)
+            print_color("Supabase services started. Waiting a few seconds for stabilization...", Colors.OKBLUE); time.sleep(10)
+
+            print_color("\nResetting local Supabase database and applying migrations...", Colors.OKBLUE)
+            run_command(["supabase", "db", "reset", "--local"], stream_output=True)
+            print_color("Database migrations applied successfully.", Colors.OKGREEN)
+
+            print_color("\nBuilding Docker images. This can take some time, especially on first run. Output below is from the build command...", Colors.OKBLUE)
+            run_command(["docker-compose", "build"], stream_output=True)
+            print_color("Docker images built. Starting services in detached mode...", Colors.OKBLUE)
+            run_command(["docker-compose", "up", "-d"]) # This typically doesn't stream much to stdout after start
+            print_color("Docker containers started in background.", Colors.OKGREEN)
+
+            print_color("\nMonitoring container startup...", Colors.OKBLUE); time.sleep(5)
             ps_result = run_command(["docker-compose", "ps"], capture_output_default=True, text_default=True)
             if ps_result and ps_result.stdout:
                 lines = ps_result.stdout.strip().split('\n')
