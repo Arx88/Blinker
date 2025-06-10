@@ -90,51 +90,32 @@ def run_command(command: List[str] | str, check=True, shell=False, cwd=None,
                 actual_cmd_for_popen_or_run,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True, # Keep True for consistent decoding, Popen handles it.
-                encoding='utf-8', # Be explicit about encoding
-                errors='replace', # Handle potential decoding errors gracefully
-                bufsize=1, # Line-buffered for stdout is often a good compromise. Char-by-char can be slow.
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                bufsize=1, # This makes it line-buffered if text=True. For char-by-char, text=False and manual decode might be needed for some platforms.
+                           # However, text=True and bufsize=1 with read(1) on stdout often works.
                 shell=shell,
                 cwd=cwd,
                 executable=executable_path if shell else None
             )
 
-            # stdout streaming:
-            output_lines = []
-            if process.stdout:
-                # For char-by-char streaming (might be slow for high-volume output):
-                # while True:
-                #     char = process.stdout.read(1)
-                #     if char == '' and process.poll() is not None:
-                #         break
-                #     if char:
-                #         print(char, end='', flush=True)
-                #         output_lines.append(char)
-                #     # Add a small sleep if char is empty but process is running to avoid tight loop
-                #     # This can make it less CPU intensive but also slower for fast output.
-                #     # A balance might be needed, or conditional sleep.
-                #     elif process.poll() is None: # process still running but no char
-                #         time.sleep(0.001) # very short sleep
-
-            # Character-by-character streaming
-            output_chars = []
+            streamed_stdout_chars = []
             if process.stdout:
                 while True:
-                    char = process.stdout.read(1)
-                    if char == '' and process.poll() is not None: # End of stream and process finished
+                    char = process.stdout.read(1) # Attempt to read one character
+                    if char == '' and process.poll() is not None: # End of stream and process has finished
                         break
                     if char:
                         print(char, end='', flush=True)
-                        output_chars.append(char)
-                    else: # No char, process might still be running (e.g., waiting for input, network)
-                          # or it might have exited between poll() and read(1)
+                        streamed_stdout_chars.append(char)
+                    else: # No char, process might still be running or finished between poll() and read(1)
                         if process.poll() is not None: # Check again if process exited
                             break
-                        time.sleep(0.001) # Small sleep to prevent tight loop if process is genuinely paused
-
+                        time.sleep(0.001) # Small sleep to prevent tight loop if process is genuinely paused or slow
                 process.stdout.close()
 
-            streamed_stdout_str = "".join(output_chars)
+            streamed_stdout_str = "".join(streamed_stdout_chars)
 
             stderr_output = ""
             if process.stderr:
@@ -468,7 +449,12 @@ def main():
         if global_config.get("SETUP_MODE") == "local":
             print_color("\n--- Setting up Local Docker Env ---", Colors.HEADER)
 
-            print_color("\nStarting local Supabase services. This may take a minute for the first time...", Colors.OKBLUE)
+            print_color("\n--- Starting Local Supabase Services ---", Colors.HEADER)
+            print_color("This is a crucial step that sets up your local development database, authentication, and other backend services using Docker.", Colors.OKCYAN)
+            print_color("IMPORTANT: The *first time* this command runs, it needs to download several Docker images (PostgreSQL, GoTrue, etc.). This can take a significant amount of time (potentially 5-20 minutes or more) depending on your internet connection and system speed.", Colors.WARNING)
+            print_color("You should see Docker image download progress messages below if this is the case. Please be patient, as it might seem like nothing is happening for periods if a large image layer is downloading or extracting.", Colors.WARNING)
+            print_color("Subsequent starts of Supabase will be much faster.", Colors.OKCYAN)
+            print_color("If it seems stuck for a very long time with no network activity shown here or in Docker Desktop, there might be an issue with your Docker setup or network access to Docker Hub.", Colors.WARNING)
             run_command(["supabase", "start"], stream_output=True)
             print_color("Supabase services started. Waiting a few seconds for stabilization...", Colors.OKBLUE); time.sleep(10)
 
