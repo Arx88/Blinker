@@ -206,7 +206,7 @@ def main():
         
         # Supabase Config
         print("\n--- Config Supabase ---")
-        gestionar_config("SUPABASE_URL", "URL Supabase")
+        gestionar_config("SUPABASE_URL", "URL Supabase", es_secreto=False)
         gestionar_config("SUPABASE_ANON_KEY", "Anon Key Supabase")
         gestionar_config("SUPABASE_SERVICE_ROLE_KEY", "Service Role Key Supabase")
 
