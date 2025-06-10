@@ -24,6 +24,14 @@ RUN npm install
 # Copy the frontend code
 COPY . .
 
+# Declare build arguments
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+# Set environment variables from build arguments
+ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
+
 ENV NEXT_PUBLIC_VERCEL_ENV production
 
 RUN npm run build
