@@ -35,62 +35,166 @@ def input_color(prompt_text, color_code=Colors.OKCYAN, input_color_code=Colors.E
     print(f"{color_code}{prompt_text}{Colors.ENDC}", end="")
     return input()
 
+def _parse_pip_error_for_failed_packages(stderr_output: str) -> List[str]:
+    """Parses pip stderr output to find names of packages that failed to install."""
+    failed_packages = set()
+    # Regex for "Could not find a version that satisfies the requirement" and "No matching distribution found for"
+    # This pattern tries to capture the package name, which might include extras like 'package[extra]'
+    # It looks for the package name following the specific pip error phrases.
+    patterns = [
+        re.compile(r"Could not find a version that satisfies the requirement\s+([a-zA-Z0-9-_.]+\[?[a-zA-Z0-9-_.,]*]?|[a-zA-Z0-9-_.]+)"),
+        re.compile(r"No matching distribution found for\s+([a-zA-Z0-9-_.]+\[?[a-zA-Z0-9-_.,]*]?|[a-zA-Z0-9-_.]+)"),
+        # More generic pattern if specific text not found but line contains "Could not find" / "No matching distribution"
+        # This is a fallback and might be less precise.
+        # re.compile(r"(?:Could not find|No matching distribution).*? for\s*([a-zA-Z0-9-_.]+\[?[a-zA-Z0-9-_.,]*]?|[a-zA-Z0-9-_.]+)")
+    ]
+    for line in stderr_output.splitlines():
+        # Try specific patterns first
+        found_specific = False
+        for pattern in patterns[:2]: # First two are more specific
+            match = pattern.search(line)
+            if match:
+                failed_packages.add(match.group(1).strip())
+                found_specific = True
+                break
+        # If specific patterns don't match, try a more general one if needed (commented out for now)
+        # if not found_specific and len(patterns) > 2:
+        #     match = patterns[2].search(line)
+        #     if match:
+        #         failed_packages.add(match.group(1).strip())
+
+    # A common way pip lists missing packages in summaries is "package1, package2, ... from project"
+    # This is a heuristic if the above don't catch structured errors well for some pip versions.
+    summary_pattern = re.compile(r"The following required packages are not installed:\s*(.+)")
+    summary_match = summary_pattern.search(stderr_output)
+    if summary_match:
+        pkgs_text = summary_match.group(1)
+        # Split by common delimiters like comma, space, 'and'
+        potential_pkgs = re.split(r'[,\s]+(?:and\s+)?', pkgs_text)
+        for pkg in potential_pkgs:
+            pkg_clean = pkg.strip().replace("'", "") # Remove quotes
+            if pkg_clean and not any(op in pkg_clean for op in ['<','>','=','!']): # Avoid version constraints
+                failed_packages.add(pkg_clean)
+
+    return list(failed_packages)
+
+
 def run_command(command, check=True, shell=False, cwd=None, capture_output_default=False, text_default=False):
-    command_list = command if isinstance(command, list) else command.split()
-    is_pip_install = (command_list[0] == "pip" or (command_list[0] == sys.executable and "-m" in command_list and "pip" in command_list)) and "install" in command_list
-    effective_capture_output = True if is_pip_install else capture_output_default
-    effective_text = True if is_pip_install else text_default
+    """Helper function to run a subprocess command with error handling and real-time output for pip install."""
 
-    print_color(f"Executing: {' '.join(command_list)}", Colors.OKBLUE)
+    # Prepare command_list and executable_path based on shell True/False
+    if shell:
+        # For shell=True, Popen/run expect a string. executable is usually figured out by the shell,
+        # but can be specified (e.g. /bin/bash).
+        command_str = command if isinstance(command, str) else " ".join(command)
+        executable_path = "/bin/bash" if platform.system().lower() in ["linux", "darwin"] else None
+        cmd_to_log_and_popen = command_str
+    else:
+        command_list = command if isinstance(command, list) else command.split()
+        executable_path = None # Not typically used when shell=False and command is a list.
+                               # First item in list is the executable.
+        cmd_to_log_and_popen = command_list
 
-    processed_command = " ".join(command_list) if shell else command_list
+    is_pip_install = isinstance(cmd_to_log_and_popen, list) and \
+                     (cmd_to_log_and_popen[0] == "pip" or \
+                      (cmd_to_log_and_popen[0] == sys.executable and "-m" in cmd_to_log_and_popen and "pip" in cmd_to_log_and_popen)) and \
+                     "install" in cmd_to_log_and_popen
+
+    print_color(f"Executing: {' '.join(cmd_to_log_and_popen) if isinstance(cmd_to_log_and_popen, list) else cmd_to_log_and_popen}", Colors.OKBLUE)
 
     try:
-        process = subprocess.run(
-            processed_command,
-            check=False,
-            shell=shell,
-            cwd=cwd,
-            capture_output=effective_capture_output,
-            text=effective_text,
-            executable=None if not shell else ("/bin/bash" if platform.system().lower() in ["linux", "darwin"] else None)
-        )
-        if effective_capture_output and process.stdout and not (is_pip_install and process.returncode == 0):
-            print_color(process.stdout, Colors.OKGREEN)
+        if is_pip_install:
+            print_color("Streaming output for pip install...", Colors.OKCYAN)
+            # Ensure command for Popen is a list if not shell=True
+            popen_cmd = cmd_to_log_and_popen if not shell else shlex.split(cmd_to_log_and_popen) if platform.system() != "Windows" else cmd_to_log_and_popen
 
-        if check and process.returncode != 0:
-            print_color(f"Error executing command: {' '.join(command_list)}", Colors.FAIL)
-            print_color(f"Return code: {process.returncode}", Colors.FAIL)
-            if is_pip_install:
-                stderr_output = process.stderr or ""
-                missing_packages = []
-                patterns = [
-                    r"ERROR: Could not find a version that satisfies the requirement (.+?)(?: \(from versions: .*\)|$)",
-                    r"ERROR: No matching distribution found for (.+?)(?: \(from versions: .*\)|$)"
-                ]
-                for pattern in patterns:
-                    matches = re.findall(pattern, stderr_output)
-                    for match in matches:
-                        pkg_name = match if isinstance(match, str) else match[0]
-                        if pkg_name not in missing_packages: missing_packages.append(pkg_name.strip())
-                if missing_packages:
+            process = subprocess.Popen(
+                popen_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1, # Line-buffered
+                shell=shell, # Use the passed shell value
+                cwd=cwd,
+                executable=executable_path if shell else None # executable is for shell=True mostly
+            )
+
+            if process.stdout:
+                for line in iter(process.stdout.readline, ''):
+                    print(line, end='') # Print line by line as it comes
+                process.stdout.close()
+
+            stderr_output = ""
+            if process.stderr:
+                stderr_output = process.stderr.read()
+                process.stderr.close()
+
+            return_code = process.wait()
+
+            if check and return_code != 0:
+                print_color(f"Command failed with exit code {return_code}", Colors.FAIL)
+
+                failed_packages = _parse_pip_error_for_failed_packages(stderr_output)
+                if failed_packages:
                     print_color("--------------------------------------------------------------------", Colors.FAIL)
                     print_color("ERROR: PIP INSTALLATION FAILED", Colors.FAIL + Colors.BOLD)
                     print_color("--------------------------------------------------------------------", Colors.FAIL)
-                    print_color("The following package(s) could not be found or installed:", Colors.WARNING)
-                    for pkg in missing_packages: print_color(f"- {pkg}", Colors.WARNING)
-                    print_color("\nThis usually means:\n1. Misspelled package name/version in 'backend/requirements.txt'.\n2. Package not on PyPI or configured indexes.\n3. Private package access issues.", Colors.OKCYAN)
-                    if stderr_output: print_color(f"\nOriginal pip error:\n{stderr_output.strip()}", Colors.FAIL)
+                    print_color("The following package(s) seem to have caused issues:", Colors.WARNING)
+                    for pkg in failed_packages: print_color(f"  - {pkg}", Colors.WARNING)
+                    print_color("\nCommon reasons for pip install failures:", Colors.OKCYAN)
+                    print_color("  1. Misspelled package name in 'backend/requirements.txt'.", Colors.OKCYAN)
+                    print_color("  2. Package not available on PyPI (public repository) or version doesn't exist.", Colors.OKCYAN)
+                    print_color("  3. Package is private and requires special configuration (e.g., custom index URL, auth).", Colors.OKCYAN)
+                    print_color("  4. Version conflicts with other packages or your Python version.", Colors.OKCYAN)
+                    print_color("  5. Network issues preventing download from package indexes.", Colors.OKCYAN)
+                    print_color("  6. Missing system-level dependencies required by the package for compilation.", Colors.OKCYAN)
+                    print_color("\nPlease check 'backend/requirements.txt', package availability, and error messages below.", Colors.OKCYAN)
+                    if stderr_output: print_color(f"\nFull pip error output:\n{stderr_output.strip()}", Colors.FAIL)
                     print_color("--------------------------------------------------------------------", Colors.FAIL)
-                elif stderr_output: print_color(f"Pip installation failed. Error:\n{stderr_output.strip()}", Colors.FAIL)
-            elif effective_capture_output:
-                if process.stdout and not (is_pip_install and process.returncode == 0): print_color(f"Stdout:\n{process.stdout.strip()}", Colors.FAIL)
-                if process.stderr: print_color(f"Stderr:\n{process.stderr.strip()}", Colors.FAIL)
-            raise subprocess.CalledProcessError(process.returncode, processed_command, output=process.stdout, stderr=process.stderr)
-        return process
+                elif stderr_output: # Not a recognized "package not found" error, but still a pip error
+                    print_color(f"Pip installation failed. Full error output:\n{stderr_output.strip()}", Colors.FAIL)
+
+                raise subprocess.CalledProcessError(return_code, cmd_to_log_and_popen, output="<stdout streamed>", stderr=stderr_output)
+
+            return subprocess.CompletedProcess(cmd_to_log_and_popen, return_code, stdout="<stdout streamed>", stderr=stderr_output)
+
+        else: # Original subprocess.run logic for non-pip-install commands
+            effective_capture_output = capture_output_default
+            effective_text = text_default
+            process = subprocess.run(
+                cmd_to_log_and_popen,
+                check=False,
+                shell=shell,
+                cwd=cwd,
+                capture_output=effective_capture_output,
+                text=effective_text,
+                executable=executable_path if shell else None
+            )
+            if effective_capture_output and process.stdout:
+                print_color(process.stdout, Colors.OKGREEN)
+
+            if check and process.returncode != 0:
+                print_color(f"Error executing command: {' '.join(cmd_to_log_and_popen) if isinstance(cmd_to_log_and_popen, list) else cmd_to_log_and_popen}", Colors.FAIL)
+                print_color(f"Return code: {process.returncode}", Colors.FAIL)
+                if effective_capture_output:
+                    if process.stdout: print_color(f"Stdout (if any):\n{process.stdout.strip()}", Colors.FAIL)
+                    if process.stderr: print_color(f"Stderr:\n{process.stderr.strip()}", Colors.FAIL)
+                raise subprocess.CalledProcessError(process.returncode, cmd_to_log_and_popen, output=process.stdout, stderr=process.stderr)
+            return process
+
     except FileNotFoundError:
-        print_color(f"Error: Command not found - {command_list[0]}. Ensure it's installed and in PATH.", Colors.FAIL)
+        cmd_name = cmd_to_log_and_popen[0] if isinstance(cmd_to_log_and_popen, list) else cmd_to_log_and_popen.split()[0]
+        print_color(f"Error: Command not found - {cmd_name}. Ensure it's installed and in PATH.", Colors.FAIL)
         raise
+    except Exception as e: # Catch any other unexpected error during command execution
+        print_color(f"An unexpected error occurred while trying to run command: {e}", Colors.FAIL)
+        raise
+
+# ... (rest of the script remains the same, ensure shlex is imported if using it for Popen with shell=True)
+# import shlex # Add this if shlex.split is used for shell=True with Popen (safer for complex commands)
+# For now, the Popen part for shell=True passes the string command directly, which is typical.
+
+# ... (rest of the file from get_os() downwards) ...
 
 def get_os():
     system = platform.system().lower()
@@ -177,225 +281,160 @@ def leer_config_completa() -> Dict[str, Any]:
             return {}
     return {}
 
-# Refactored gestionar_config
 def gestionar_config(clave: str, descripcion: str, es_secreto: bool,
                      valor_predeterminado: Optional[str], current_config: dict,
                      ask_use_saved: bool = True) -> str:
-    """Manages a single configuration item by operating on current_config dict."""
     valor_actual = current_config.get(clave)
-
     if ask_use_saved and valor_actual is not None:
         display_val = '(hidden)' if es_secreto else f"'{valor_actual}'"
         prompt_text = f"Saved value for {descripcion} ({display_val}). Use it? (Y/n): "
         if input_color(prompt_text, Colors.WARNING).strip().lower() in ['y', '']:
             return valor_actual
-
-    if valor_predeterminado is not None and valor_actual is None : # Use default if no current value from file or user declined saved
+    if valor_predeterminado is not None and valor_actual is None :
         print_color(f"Using default value for {descripcion}: {'(hidden)' if es_secreto else valor_predeterminado}", Colors.OKBLUE)
         current_config[clave] = valor_predeterminado
         return valor_predeterminado
-
     prompt_text = f"Enter {descripcion}: "
     if es_secreto:
-        print_color(prompt_text, Colors.OKCYAN, input_color_code=Colors.ENDC) # Print the prompt text first
-        print_color("(Input will be hidden for security)", Colors.OKCYAN) # Then the notification
-        new_value = getpass.getpass("") # Actual hidden input call
+        print_color(prompt_text, Colors.OKCYAN, input_color_code=Colors.ENDC)
+        print_color("(Input will be hidden for security)", Colors.OKCYAN)
+        new_value = getpass.getpass("")
     else:
         new_value = input_color(prompt_text, Colors.OKCYAN)
-    
     current_config[clave] = new_value
     return new_value
 
-# New gestionar_grupo_config
 def gestionar_grupo_config(group_name: str, keys_info: List[Dict[str, Any]],
                            global_config: Dict[str, Any], setup_mode: str) -> None:
     print_color(f"\n--- {group_name} Configuration ---", Colors.HEADER)
-
     all_keys_exist = all(key_info["clave"] in global_config for key_info in keys_info)
-
     if all_keys_exist:
         print_color(f"Saved settings found for {group_name}:", Colors.OKBLUE)
         for key_info in keys_info:
             display_val = '(hidden)' if key_info["es_secreto"] and global_config.get(key_info["clave"]) else global_config.get(key_info["clave"], 'Not set')
             print_color(f"  - {key_info['descripcion']}: {display_val}", Colors.OKCYAN)
-
-        use_group_saved = input_color(f"Do you want to use all currently saved settings for {group_name}? (Y/n): ", Colors.WARNING).strip().lower()
+        use_group_saved = input_color(f"Use all saved settings for {group_name}? (Y/n): ", Colors.WARNING).strip().lower()
         if use_group_saved in ['y', '']:
-            print_color(f"Using saved settings for {group_name}.", Colors.OKGREEN)
-            return # Skip individual configuration for this group
-
+            print_color(f"Using saved settings for {group_name}.", Colors.OKGREEN); return
     print_color(f"Proceeding with individual configuration for {group_name}...", Colors.OKBLUE)
     for key_info in keys_info:
         default_key = 'default_local' if setup_mode == "local" else 'default_daytona'
         valor_predeterminado = key_info.get(default_key)
-
-        # If group settings were declined, 'ask_use_saved' should be True for individual items.
-        # If not all keys existed for group prompt, also ask for individual items.
-        ask_individual = True
         gestionar_config(key_info['clave'], key_info['descripcion'],
                          key_info['es_secreto'], valor_predeterminado,
-                         global_config, ask_use_saved=ask_individual)
+                         global_config, ask_use_saved=True)
 
 def main():
     try:
         print_color("--- Welcome to Blinker Setup ---", Colors.HEADER + Colors.BOLD)
-
-        # Ensure .blinker_config and .env are in .gitignore
-        gitignore_path = ".gitignore"
-        entries_to_ignore = [CONFIG_FILE, ".env"]
-        added_to_gitignore = []
+        gitignore_path = ".gitignore"; entries_to_ignore = [CONFIG_FILE, ".env"]; added_to_gitignore = []
         current_gitignore_content = ""
-
         if os.path.exists(gitignore_path):
-            with open(gitignore_path, 'r') as f_read:
-                current_gitignore_content = f_read.read()
-
-        with open(gitignore_path, 'a+') as f_append: # Open in append mode, create if not exists
+            with open(gitignore_path, 'r') as f_read: current_gitignore_content = f_read.read()
+        with open(gitignore_path, 'a+') as f_append:
             for entry in entries_to_ignore:
-                # Check if entry (as a whole line) is present to avoid partial matches
                 if not re.search(rf"^{re.escape(entry)}$", current_gitignore_content, re.MULTILINE):
-                    f_append.seek(0, os.SEEK_END) # Go to the end of the file
-                    if f_append.tell() > 0 and current_gitignore_content[-1] != '\n' : # Check if file is not empty and last char is not newline
-                        f_append.write("\n") # Add newline if file doesn't end with one
-                    elif f_append.tell() == 0: # File was empty or just created
-                        pass # No newline needed before first entry
-                    else: # File not empty and ends with newline
-                         pass # No newline needed
-                    f_append.write(f"{entry}\n")
-                    added_to_gitignore.append(entry)
-
-        if added_to_gitignore:
-            print_color(f"Ensured {', '.join(added_to_gitignore)} {'are' if len(added_to_gitignore) > 1 else 'is'} in .gitignore to protect sensitive information.", Colors.OKGREEN)
+                    f_append.seek(0, os.SEEK_END)
+                    if f_append.tell() > 0 and current_gitignore_content and current_gitignore_content[-1] != '\n': f_append.write("\n")
+                    f_append.write(f"{entry}\n"); added_to_gitignore.append(entry)
+        if added_to_gitignore: print_color(f"Ensured {', '.join(added_to_gitignore)} in .gitignore.", Colors.OKGREEN)
 
         os_type = get_os()
-        print_color(f"Operating System detected: {os_type}", Colors.OKBLUE)
+        print_color(f"OS detected: {os_type}", Colors.OKBLUE)
         if os_type == "unknown": print_color("Unsupported OS. Exiting.", Colors.FAIL); return
 
         if not check_docker(): return
         if not check_mise() and (input_color("Mise not found. Install? (Y/n): ", Colors.WARNING).lower() not in ['y', ''] or not install_mise(os_type)):
-            print_color("Mise required. Install manually and restart.", Colors.FAIL); return
+            print_color("Mise required. Install manually.", Colors.FAIL); return
         if not check_supabase_cli() and (input_color("Supabase CLI not found. Install? (Y/n): ", Colors.WARNING).lower() not in ['y', ''] or not install_supabase_cli(os_type)):
-            print_color("Supabase CLI required. Install manually and restart.", Colors.FAIL); return
-        print_color("\n--- All essential dependencies checked/installed. ---", Colors.OKGREEN + Colors.BOLD)
+            print_color("Supabase CLI required. Install manually.", Colors.FAIL); return
+        print_color("\n--- Dependencies OK. ---", Colors.OKGREEN + Colors.BOLD)
 
         global_config = leer_config_completa()
-
         print_color("\n--- Blinker Setup Mode ---", Colors.HEADER)
-        print_color("Choose how Blinker runs: locally via Docker, or for Daytona (advanced).", Colors.OKCYAN)
-        
-        # SETUP_MODE is handled individually as it determines defaults for other groups
-        setup_mode_default = global_config.get("SETUP_MODE", "local") # Default to local if nothing saved
+        setup_mode_default = global_config.get("SETUP_MODE", "local")
         current_setup_mode = ""
         while True:
-            choice_prompt = f"Choose installation mode (current default: {setup_mode_default}): 1. Local (Docker) 2. Daytona: "
-            choice = input_color(choice_prompt, Colors.WARNING).strip().lower()
-            temp_mode_choice = ""
-            if choice == '1' or choice == 'local': temp_mode_choice = "local"
-            elif choice == '2' or choice == 'daytona': temp_mode_choice = "daytona"
-            elif choice == '' : # User pressed Enter, use current default
-                temp_mode_choice = setup_mode_default
-                print_color(f"Using default mode: {temp_mode_choice}", Colors.OKBLUE)
-            else: print_color("Invalid choice. Enter 1 or 2, or press Enter for default.", Colors.FAIL); continue
+            choice = input_color(f"Mode (default: {setup_mode_default}): 1. Local 2. Daytona: ", Colors.WARNING).strip().lower()
+            temp_mode_choice = {"1": "local", "local": "local", "2": "daytona", "daytona": "daytona", "": setup_mode_default}.get(choice)
+            if not temp_mode_choice: print_color("Invalid choice.", Colors.FAIL); continue
+            global_config["SETUP_MODE"] = temp_mode_choice; current_setup_mode = temp_mode_choice
+            print_color(f"Mode set to '{current_setup_mode}'.", Colors.OKGREEN); break
 
-            # Update global_config directly with the choice for SETUP_MODE
-            global_config["SETUP_MODE"] = temp_mode_choice
-            current_setup_mode = temp_mode_choice # This is the chosen/confirmed mode
-            print_color(f"Blinker will be set up in '{current_setup_mode}' mode.", Colors.OKGREEN)
-            break
-        
-        supabase_keys_info = [
-            {"clave": "SUPABASE_URL", "descripcion": "Supabase Project URL", "es_secreto": False,
-             "default_local": "http://localhost:54321", "default_daytona": None},
-            {"clave": "SUPABASE_ANON_KEY", "descripcion": "Supabase Anon Key", "es_secreto": False,
-             "default_local": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43NBqxLiCRs4MFMSumSBOMזה", "default_daytona": None},
-            {"clave": "SUPABASE_SERVICE_ROLE_KEY", "descripcion": "Supabase Service Role Key", "es_secreto": True,
-             "default_local": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU", "default_daytona": None}
+        supabase_keys = [
+            {"clave": "SUPABASE_URL", "desc": "URL", "sec": False, "loc": "http://localhost:54321"},
+            {"clave": "SUPABASE_ANON_KEY", "desc": "Anon Key", "sec": False, "loc": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43NBqxLiCRs4MFMSumSBOMזה"},
+            {"clave": "SUPABASE_SERVICE_ROLE_KEY", "desc": "Service Role Key", "sec": True, "loc": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU"}
         ]
-        if current_setup_mode == "daytona": # No defaults for daytona mode, prompt user for cloud details
-            print_color("For Daytona/Cloud mode, please provide your Supabase Cloud project details.", Colors.OKCYAN)
-            for k_info in supabase_keys_info: k_info['default_local'] = None # Nullify local defaults
-
-        gestionar_grupo_config("Supabase", supabase_keys_info, global_config, current_setup_mode)
+        supabase_keys_info_updated = [{"clave": k["clave"], "descripcion": f"Supabase {k['desc']}", "es_secreto": k["sec"],
+                                   "default_local": k["loc"], "default_daytona": None} for k in supabase_keys]
+        if current_setup_mode == "daytona":
+            print_color("For Daytona mode, provide Supabase Cloud details.", Colors.OKCYAN)
+            for k_info in supabase_keys_info_updated: k_info['default_local'] = None
+        gestionar_grupo_config("Supabase", supabase_keys_info_updated, global_config, current_setup_mode)
 
         print_color("\n--- Optional API Keys ---", Colors.HEADER)
-        tools_api_keys = [
-            {"name": "Zillow", "key": "RAPIDAPI_KEY_ZILLOW", "desc": "RapidAPI Key for Zillow"},
-            {"name": "Twitter", "key": "TWITTER_API_KEY", "desc": "Twitter API Key"}
-        ]
-        for tool_spec in tools_api_keys:
-            prompt_text = f"Configure {tool_spec['name']} API Key? (Y/n): "
-            configure_tool = input_color(prompt_text, Colors.WARNING).strip().lower()
-            if configure_tool == 'y' or configure_tool == '':
-                gestionar_config(tool_spec['key'], tool_spec['desc'], True, None, global_config)
-        
-        # Save all configurations at the end
-        try:
-            with open(CONFIG_FILE, 'w') as f: json.dump(global_config, f, indent=4)
-            print_color(f"\nAll configurations saved to '{CONFIG_FILE}'.", Colors.OKGREEN + Colors.BOLD)
-        except IOError as e:
-            print_color(f"Critical Error: Failed to save configurations to '{CONFIG_FILE}': {e}", Colors.FAIL + Colors.BOLD)
-            return # Cannot proceed if config saving fails
+        tools_api_keys = [{"name": "Zillow", "key": "RAPIDAPI_KEY_ZILLOW", "desc": "RapidAPI Key for Zillow"},
+                          {"name": "Twitter", "key": "TWITTER_API_KEY", "desc": "Twitter API Key"}]
+        for tool in tools_api_keys:
+            if input_color(f"Configure {tool['name']} API Key? (Y/n): ", Colors.WARNING).lower() in ['y', '']:
+                gestionar_config(tool['key'], tool['desc'], True, None, global_config)
+
+        with open(CONFIG_FILE, 'w') as f: json.dump(global_config, f, indent=4)
+        print_color(f"\nConfigs saved to '{CONFIG_FILE}'.", Colors.OKGREEN + Colors.BOLD)
 
         print_color("\n--- Generating .env file ---", Colors.HEADER)
-        env_lines = [f"NEXT_PUBLIC_SUPABASE_URL={global_config.get('SUPABASE_URL', '')}",
-                     f"NEXT_PUBLIC_SUPABASE_ANON_KEY={global_config.get('SUPABASE_ANON_KEY', '')}",
-                     f"SUPABASE_SERVICE_ROLE_KEY={global_config.get('SUPABASE_SERVICE_ROLE_KEY', '')}",
-                     f"BLINKER_SETUP_MODE={global_config.get('SETUP_MODE', 'local')}"]
-        if global_config.get("SETUP_MODE") == "local":
-            env_lines.append("NEXT_PUBLIC_API_URL=http://localhost:8000")
-        for tool_spec in tools_api_keys:
-            if tool_spec['key'] in global_config:
-                env_lines.append(f"{tool_spec['key']}={global_config[tool_spec['key']]}")
+        env_vars = {f"NEXT_PUBLIC_SUPABASE_URL": global_config.get('SUPABASE_URL'),
+                    f"NEXT_PUBLIC_SUPABASE_ANON_KEY": global_config.get('SUPABASE_ANON_KEY'),
+                    f"SUPABASE_SERVICE_ROLE_KEY": global_config.get('SUPABASE_SERVICE_ROLE_KEY'),
+                    f"BLINKER_SETUP_MODE": global_config.get('SETUP_MODE')}
+        if global_config.get("SETUP_MODE") == "local": env_vars["NEXT_PUBLIC_API_URL"] = "http://localhost:8000"
+        for tool in tools_api_keys:
+            if tool['key'] in global_config: env_vars[tool['key']] = global_config[tool['key']]
+        env_lines = [f"{k}={v}" for k, v in env_vars.items() if v is not None]
         with open(".env", "w") as f: f.write("\n".join(env_lines) + "\n")
-        print_color(".env file generated successfully.", Colors.OKGREEN)
+        print_color(".env generated.", Colors.OKGREEN)
 
         print_color("\n--- Starting Services ---", Colors.HEADER + Colors.BOLD)
-        print_color("Ensuring tool versions with Mise...", Colors.OKBLUE)
-        run_command(["mise", "install"])
-        print_color("Installing Python dependencies...", Colors.OKBLUE)
-        run_command([sys.executable, "-m", "pip", "install", "-r", "backend/requirements.txt"])
-        print_color("Installing Frontend dependencies (this may take a while)...", Colors.OKBLUE)
-        run_command(["npm", "install", "--prefix", "frontend"])
+        print_color("Mise ensuring tool versions...", Colors.OKBLUE); run_command(["mise", "install"])
+        print_color("Installing Python deps...", Colors.OKBLUE); run_command([sys.executable, "-m", "pip", "install", "-r", "backend/requirements.txt"])
+        print_color("Installing Frontend deps...", Colors.OKBLUE); run_command(["npm", "install", "--prefix", "frontend"])
 
         if global_config.get("SETUP_MODE") == "local":
-            print_color("\n--- Setting up Local Environment with Docker ---", Colors.HEADER)
-            print_color("Starting local Supabase instance...", Colors.OKBLUE)
-            run_command(["supabase", "start"])
-            print_color("Supabase started. Waiting for stabilization...", Colors.OKBLUE); time.sleep(10)
-            print_color("Resetting local DB & applying migrations...", Colors.OKBLUE)
-            run_command(["supabase", "db", "reset", "--local"])
-            print_color("Building and starting Docker containers...", Colors.OKBLUE)
-            run_command(["docker-compose", "up", "--build", "-d"])
+            print_color("\n--- Setting up Local Docker Env ---", Colors.HEADER)
+            print_color("Starting Supabase...", Colors.OKBLUE); run_command(["supabase", "start"])
+            print_color("Supabase started. Stabilizing...", Colors.OKBLUE); time.sleep(10)
+            print_color("Resetting DB & migrations...", Colors.OKBLUE); run_command(["supabase", "db", "reset", "--local"])
+            print_color("Starting Docker containers...", Colors.OKBLUE); run_command(["docker-compose", "up", "--build", "-d"])
             print_color("Docker containers started.", Colors.OKGREEN)
-            print_color("\nMonitoring container startup...", Colors.OKBLUE); time.sleep(5)
+            print_color("\nMonitoring containers...", Colors.OKBLUE); time.sleep(5)
             ps_result = run_command(["docker-compose", "ps"], capture_output_default=True, text_default=True)
             if ps_result and ps_result.stdout:
                 lines = ps_result.stdout.strip().split('\n')
                 services_status = {}
                 if len(lines) > 2:
                     for line in lines[2:]:
-                        parts = line.split(); service_name = parts[0]; service_state = " ".join(parts[2:])
-                        ok_color = Colors.OKGREEN if "up" in service_state.lower() or "running" in service_state.lower() or "healthy" in service_state.lower() else Colors.FAIL
-                        services_status[service_name] = ok_color + service_state
-                print_color("Docker Compose Services Status:", Colors.HEADER)
+                        parts = line.split(); s_name = parts[0]; s_state = " ".join(parts[2:])
+                        ok_col = Colors.OKGREEN if any(k in s_state.lower() for k in ["up", "running", "healthy"]) else Colors.FAIL
+                        services_status[s_name] = ok_col + s_state
+                print_color("Docker Services Status:", Colors.HEADER)
                 for name, status in services_status.items(): print_color(f"  - {name}: {status}", Colors.OKCYAN)
-                expected_services = ["frontend", "backend"]
-                all_ok = all(any(srv in k and Colors.OKGREEN in v for k,v in services_status.items()) for srv in expected_services)
+                expected = ["frontend", "backend"]
+                all_ok = all(any(s in k and Colors.OKGREEN in v for k,v in services_status.items()) for s in expected)
                 if all_ok:
                     print_color("\n--- Blinker is Ready! ---", Colors.OKGREEN + Colors.BOLD)
                     print_color("  Frontend: http://localhost:3000", Colors.OKCYAN)
                     print_color("  Backend API: http://localhost:8000", Colors.OKCYAN)
-                else:
-                    print_color("\nWARNING: Some services may not be running correctly. Check 'docker-compose logs'.", Colors.WARNING)
+                else: print_color("\nWARNING: Some services may not be running. Check 'docker-compose logs'.", Colors.WARNING)
         elif global_config.get("SETUP_MODE") == "daytona":
             print_color("\n--- Daytona Mode Setup Complete ---", Colors.OKGREEN + Colors.BOLD)
-            print_color("Blinker configured for Daytona. Deploy via Daytona-specific instructions.", Colors.OKCYAN)
+            print_color("Blinker configured for Daytona. Deploy via Daytona instructions.", Colors.OKCYAN)
 
         print_color("\n--- Setup Finished ---", Colors.HEADER + Colors.BOLD)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print_color("\nA critical command failed or was not found. Setup cannot continue.", Colors.FAIL + Colors.BOLD)
+        print_color("\nCritical command error. Setup failed.", Colors.FAIL + Colors.BOLD)
     except Exception as e:
-        print_color(f"\nAn unexpected error occurred: {e}", Colors.FAIL + Colors.BOLD)
+        print_color(f"\nUnexpected error: {e}", Colors.FAIL + Colors.BOLD)
 
 if __name__ == "__main__":
     main()
