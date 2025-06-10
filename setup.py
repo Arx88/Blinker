@@ -67,13 +67,12 @@ def run_command(command: List[str] | str, check=True, shell=False, cwd=None,
 
     if shell:
         cmd_to_log = command if isinstance(command, str) else " ".join(command)
-        actual_cmd_for_popen_or_run = cmd_to_log # Popen/run with shell=True takes a string
+        actual_cmd_for_popen_or_run = cmd_to_log
         executable_path = "/bin/bash" if platform.system().lower() in ["linux", "darwin"] else None
     else:
-        cmd_to_log_list = command if isinstance(command, list) else command.split()
+        cmd_to_log_list = command if isinstance(command, list) else shlex.split(command) # Use shlex for robust splitting if command is a string
         cmd_to_log = " ".join(cmd_to_log_list)
-        actual_cmd_for_popen_or_run = cmd_to_log_list # Popen/run with shell=False takes a list
-        # executable_path is usually None when shell=False, as the first item in list is the executable
+        actual_cmd_for_popen_or_run = cmd_to_log_list
 
     is_pip_install = isinstance(actual_cmd_for_popen_or_run, list) and \
                      (actual_cmd_for_popen_or_run[0] == "pip" or \
@@ -88,13 +87,6 @@ def run_command(command: List[str] | str, check=True, shell=False, cwd=None,
                 print_color(f"Streaming output for pip install: {cmd_to_log}", Colors.OKCYAN)
             elif stream_output:
                 print_color(f"Streaming output for: {cmd_to_log}", Colors.OKCYAN)
-
-            # Popen needs a list for command unless shell=True.
-            # If shell=True, actual_cmd_for_popen_or_run is already a string.
-            # If shell=False, actual_cmd_for_popen_or_run is already a list.
-            # shlex.split is mainly for converting a string command to a list for shell=False,
-            # or for shell=True if the command string has complex quoting not handled well by default.
-            # Given current logic, actual_cmd_for_popen_or_run should be correctly formatted.
 
             process = subprocess.Popen(
                 actual_cmd_for_popen_or_run,
@@ -122,28 +114,25 @@ def run_command(command: List[str] | str, check=True, shell=False, cwd=None,
             if check and return_code != 0:
                 print_color(f"Command failed with exit code {return_code}: {cmd_to_log}", Colors.FAIL)
 
-                if is_pip_install: # Only do detailed pip parsing if it was a pip install command
+                if is_pip_install:
                     failed_packages = _parse_pip_error_for_failed_packages(stderr_output)
                     if failed_packages:
                         print_color("--------------------------------------------------------------------", Colors.FAIL)
                         print_color("ERROR: PIP INSTALLATION FAILED", Colors.FAIL + Colors.BOLD)
-                        print_color("--------------------------------------------------------------------", Colors.FAIL)
+                        # ... (rest of pip error details)
                         print_color("The following package(s) seem to have caused issues:", Colors.WARNING)
                         for pkg in failed_packages: print_color(f"  - {pkg}", Colors.WARNING)
                         print_color("\nCommon reasons for pip install failures:", Colors.OKCYAN)
-                        # ... (common reasons as before)
                         print_color("  1. Misspelled package name in 'backend/requirements.txt'.", Colors.OKCYAN)
-                        print_color("  2. Package not available on PyPI (public repository) or version doesn't exist.", Colors.OKCYAN)
-                        print_color("  3. Package is private and requires special configuration (e.g., custom index URL, auth).", Colors.OKCYAN)
-                        print_color("  4. Version conflicts with other packages or your Python version.", Colors.OKCYAN)
-                        print_color("  5. Network issues preventing download from package indexes.", Colors.OKCYAN)
-                        print_color("  6. Missing system-level dependencies required by the package for compilation.", Colors.OKCYAN)
-                        print_color("\nPlease check 'backend/requirements.txt', package availability, and error messages below.", Colors.OKCYAN)
+                        print_color("  2. Package not available on PyPI or version doesn't exist.", Colors.OKCYAN)
+                        print_color("  3. Private package (requires custom index URL, auth).", Colors.OKCYAN)
+                        print_color("  4. Version conflicts or Python version incompatibility.", Colors.OKCYAN)
+                        print_color("  5. Network issues or missing system-level dependencies.", Colors.OKCYAN)
                         if stderr_output: print_color(f"\nFull pip error output:\n{stderr_output.strip()}", Colors.FAIL)
                         print_color("--------------------------------------------------------------------", Colors.FAIL)
                     elif stderr_output:
                         print_color(f"Pip installation failed. Full error output:\n{stderr_output.strip()}", Colors.FAIL)
-                elif stderr_output: # For non-pip streamed commands that failed
+                elif stderr_output:
                      print_color(f"Error output:\n{stderr_output.strip()}", Colors.FAIL)
 
                 raise subprocess.CalledProcessError(return_code, actual_cmd_for_popen_or_run, output="<stdout streamed>", stderr=stderr_output)
@@ -171,7 +160,6 @@ def run_command(command: List[str] | str, check=True, shell=False, cwd=None,
                 if effective_capture_output:
                     if process_obj.stdout: print_color(f"Stdout (if any):\n{process_obj.stdout.strip()}", Colors.FAIL)
                     if process_obj.stderr: print_color(f"Stderr:\n{process_obj.stderr.strip()}", Colors.FAIL)
-                # No detailed pip parsing here, as pip installs go through Popen path.
                 raise subprocess.CalledProcessError(process_obj.returncode, actual_cmd_for_popen_or_run, output=process_obj.stdout, stderr=process_obj.stderr)
             return process_obj
 
@@ -227,6 +215,26 @@ def check_supabase_cli():
         return True
     print_color("Supabase CLI not found.", Colors.WARNING)
     return False
+
+def check_npm():
+    print_color("\n--- Checking for npm (Node Package Manager) ---", Colors.HEADER)
+    if not shutil.which("npm"):
+        print_color("npm command not found in PATH.", Colors.FAIL)
+        return False
+    try:
+        # Use list form for command when shell=False
+        result = run_command(["npm", "--version"], check=False, capture_output_default=True, text_default=True)
+        if result.returncode == 0:
+            print_color(f"npm found. Version: {result.stdout.strip()}", Colors.OKGREEN)
+            return True
+        else:
+            print_color(f"npm command found, but 'npm --version' failed with exit code {result.returncode}.", Colors.FAIL)
+            if result.stderr:
+                print_color(f"npm --version error output: {result.stderr.strip()}", Colors.FAIL)
+            return False
+    except Exception as e:
+        print_color(f"An error occurred while trying to run 'npm --version': {e}", Colors.FAIL)
+        return False
 
 def install_mise(os_type):
     print_color("\nAttempting to install Mise...", Colors.OKBLUE)
@@ -387,6 +395,23 @@ def main():
         print_color("\nEnsuring correct tool versions with Mise. This might take a few moments if new versions need to be downloaded/installed...", Colors.OKBLUE)
         run_command(["mise", "install"], stream_output=True)
         print_color("Mise tool versioning complete.", Colors.OKGREEN)
+
+        if not check_npm():
+            print_color("\nMise has completed, but 'npm' (Node Package Manager) was not found or is not working in the current environment.", Colors.FAIL)
+            print_color("This is often because your terminal session needs to be updated for PATH changes made by Mise to take full effect (especially on Windows).", Colors.WARNING)
+            print_color("\nPlease try the following steps:", Colors.WARNING)
+            print_color("  1. Close this terminal window.", Colors.WARNING)
+            print_color("  2. Open a new terminal window.", Colors.WARNING)
+            print_color("  3. Navigate back to the Blinker project directory.", Colors.WARNING)
+            print_color("  4. Run 'python setup.py' again.", Colors.WARNING)
+            print_color("\nThe setup will resume using your saved configuration.", Colors.OKCYAN)
+            print_color("If 'npm' is still not found after restarting the terminal,", Colors.WARNING)
+            print_color("please ensure Node.js was correctly installed by Mise (you can check with 'mise ls' or 'mise doctor')", Colors.WARNING)
+            print_color("and that your system's PATH environment variable includes the necessary directories for Mise shims", Colors.WARNING)
+            print_color("(usually ~/.local/share/mise/shims on Linux/macOS, or check Mise documentation for Windows).", Colors.WARNING)
+            print_color("\nSetup cannot continue without a working npm.", Colors.FAIL)
+            sys.exit(1)
+        print_color("npm check successful.", Colors.OKGREEN)
 
         print_color("\nInstalling Python dependencies from backend/requirements.txt. This may take several minutes depending on network speed and package complexity...", Colors.OKBLUE)
         run_command([sys.executable, "-m", "pip", "install", "-r", "backend/requirements.txt"], stream_output=True)
