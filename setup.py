@@ -39,7 +39,7 @@ def input_color(prompt_text, color_code=Colors.OKCYAN, input_color_code=Colors.E
 def _parse_pip_error_for_failed_packages(stderr_output: str) -> List[str]:
     failed_packages = set()
     patterns = [
-        re.compile(r"Could not find a version that satisfies the requirement\s+([a-zA-Z0-9-_.]+\[?[a-zA-Z0-9-_.,]*]?|[a-zA-Z0-9-_.]+)"),
+        re.compile(r"Could not find a version that satisfies the requirement\s+([a-zA-Z0-9-_.]+\[?[a-zA-Z0-9-_.,]*]?|[a-zA-Z0-9-_.]+)"), # Added comma
         re.compile(r"No matching distribution found for\s+([a-zA-Z0-9-_.]+\[?[a-zA-Z0-9-_.,]*]?|[a-zA-Z0-9-_.]+)"),
     ]
     for line in stderr_output.splitlines():
