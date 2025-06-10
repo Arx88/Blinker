@@ -70,7 +70,7 @@ def run_command(command: List[str] | str, check=True, shell=False, cwd=None,
         actual_cmd_for_popen_or_run = cmd_to_log
         executable_path = "/bin/bash" if platform.system().lower() in ["linux", "darwin"] else None
     else:
-        cmd_to_log_list = command if isinstance(command, list) else shlex.split(command) # Use shlex for robust splitting if command is a string
+        cmd_to_log_list = command if isinstance(command, list) else shlex.split(command)
         cmd_to_log = " ".join(cmd_to_log_list)
         actual_cmd_for_popen_or_run = cmd_to_log_list
 
@@ -79,14 +79,17 @@ def run_command(command: List[str] | str, check=True, shell=False, cwd=None,
                       (actual_cmd_for_popen_or_run[0] == sys.executable and "-m" in actual_cmd_for_popen_or_run and "pip" in actual_cmd_for_popen_or_run)) and \
                      "install" in actual_cmd_for_popen_or_run
 
-    print_color(f"Executing: {cmd_to_log}", Colors.OKBLUE)
+    # This print statement was moved down after the Popen specific message for streaming
+    # print_color(f"Executing: {cmd_to_log}", Colors.OKBLUE)
 
     try:
         if stream_output or is_pip_install:
             if is_pip_install:
-                print_color(f"Streaming output for pip install: {cmd_to_log}", Colors.OKCYAN)
+                print_color(f"Executing & Streaming output for pip install: {cmd_to_log}", Colors.OKBLUE)
             elif stream_output:
-                print_color(f"Streaming output for: {cmd_to_log}", Colors.OKCYAN)
+                print_color(f"Executing & Streaming output for: {cmd_to_log}", Colors.OKBLUE)
+            else: # Should not happen if logic is correct, but for safety:
+                print_color(f"Executing: {cmd_to_log}", Colors.OKBLUE)
 
             process = subprocess.Popen(
                 actual_cmd_for_popen_or_run,
@@ -119,7 +122,6 @@ def run_command(command: List[str] | str, check=True, shell=False, cwd=None,
                     if failed_packages:
                         print_color("--------------------------------------------------------------------", Colors.FAIL)
                         print_color("ERROR: PIP INSTALLATION FAILED", Colors.FAIL + Colors.BOLD)
-                        # ... (rest of pip error details)
                         print_color("The following package(s) seem to have caused issues:", Colors.WARNING)
                         for pkg in failed_packages: print_color(f"  - {pkg}", Colors.WARNING)
                         print_color("\nCommon reasons for pip install failures:", Colors.OKCYAN)
@@ -140,6 +142,7 @@ def run_command(command: List[str] | str, check=True, shell=False, cwd=None,
             return subprocess.CompletedProcess(actual_cmd_for_popen_or_run, return_code, stdout="<stdout streamed>", stderr=stderr_output)
 
         else:
+            print_color(f"Executing: {cmd_to_log}", Colors.OKBLUE) # Print for non-streamed commands here
             effective_capture_output = capture_output_default
             effective_text = text_default
             process_obj = subprocess.run(
@@ -216,25 +219,24 @@ def check_supabase_cli():
     print_color("Supabase CLI not found.", Colors.WARNING)
     return False
 
-def check_npm():
-    print_color("\n--- Checking for npm (Node Package Manager) ---", Colors.HEADER)
-    if not shutil.which("npm"):
-        print_color("npm command not found in PATH.", Colors.FAIL)
-        return False
-    try:
-        # Use list form for command when shell=False
-        result = run_command(["npm", "--version"], check=False, capture_output_default=True, text_default=True)
-        if result.returncode == 0:
-            print_color(f"npm found. Version: {result.stdout.strip()}", Colors.OKGREEN)
-            return True
-        else:
-            print_color(f"npm command found, but 'npm --version' failed with exit code {result.returncode}.", Colors.FAIL)
-            if result.stderr:
-                print_color(f"npm --version error output: {result.stderr.strip()}", Colors.FAIL)
-            return False
-    except Exception as e:
-        print_color(f"An error occurred while trying to run 'npm --version': {e}", Colors.FAIL)
-        return False
+# def check_npm(): # Commented out as per instruction
+#     print_color("\n--- Checking for npm (Node Package Manager) ---", Colors.HEADER)
+#     if not shutil.which("npm"):
+#         print_color("npm command not found in PATH.", Colors.FAIL)
+#         return False
+#     try:
+#         result = run_command(["npm", "--version"], check=False, capture_output_default=True, text_default=True)
+#         if result.returncode == 0:
+#             print_color(f"npm found. Version: {result.stdout.strip()}", Colors.OKGREEN)
+#             return True
+#         else:
+#             print_color(f"npm command found, but 'npm --version' failed with exit code {result.returncode}.", Colors.FAIL)
+#             if result.stderr:
+#                 print_color(f"npm --version error output: {result.stderr.strip()}", Colors.FAIL)
+#             return False
+#     except Exception as e:
+#         print_color(f"An error occurred while trying to run 'npm --version': {e}", Colors.FAIL)
+#         return False
 
 def install_mise(os_type):
     print_color("\nAttempting to install Mise...", Colors.OKBLUE)
@@ -396,29 +398,67 @@ def main():
         run_command(["mise", "install"], stream_output=True)
         print_color("Mise tool versioning complete.", Colors.OKGREEN)
 
-        if not check_npm():
-            print_color("\nMise has completed, but 'npm' (Node Package Manager) was not found or is not working in the current environment.", Colors.FAIL)
-            print_color("This is often because your terminal session needs to be updated for PATH changes made by Mise to take full effect (especially on Windows).", Colors.WARNING)
+        # if not check_npm(): # Commented out as per instruction
+        #     print_color("\nMise has completed, but 'npm' (Node Package Manager) was not found or is not working in the current environment.", Colors.FAIL)
+        #     # ... (rest of the guidance block)
+        #     sys.exit(1)
+        # print_color("npm check successful.", Colors.OKGREEN)
+
+        print_color("\n--- Locating npm via mise ---", Colors.HEADER)
+        npm_executable_path = ""
+        try:
+            mise_which_result = run_command(
+                ["mise", "which", "npm"],
+                capture_output_default=True,
+                text_default=True, # Changed from text=True
+                check=False
+            )
+
+            if mise_which_result.returncode == 0 and mise_which_result.stdout and mise_which_result.stdout.strip():
+                npm_executable_path = mise_which_result.stdout.strip()
+                print_color(f"Found npm executable via 'mise which npm': {npm_executable_path}", Colors.OKGREEN)
+
+                print_color(f"Verifying {npm_executable_path} --version...", Colors.OKBLUE)
+                npm_version_result = run_command(
+                    [npm_executable_path, "--version"],
+                    capture_output_default=True,
+                    text_default=True, # Changed from text=True
+                    check=False
+                )
+                if npm_version_result.returncode == 0:
+                    print_color(f"npm version: {npm_version_result.stdout.strip()}", Colors.OKGREEN)
+                else:
+                    print_color(f"Warning: '{npm_executable_path} --version' failed. Will attempt to use it anyway.", Colors.WARNING)
+                    if npm_version_result.stderr:
+                         print_color(f"npm --version error: {npm_version_result.stderr.strip()}", Colors.WARNING)
+            else:
+                npm_executable_path = ""
+                print_color("Failed to locate npm via 'mise which npm'.", Colors.FAIL)
+                if mise_which_result.stderr:
+                    print_color(f"'mise which npm' error: {mise_which_result.stderr.strip()}", Colors.FAIL)
+
+        except Exception as e:
+            print_color(f"An error occurred while trying to run 'mise which npm': {e}", Colors.FAIL)
+            npm_executable_path = ""
+
+        if not npm_executable_path:
+            print_color("\n'npm' (Node Package Manager) could not be located via 'mise which npm'.", Colors.FAIL)
+            print_color("This might indicate an issue with the Node.js installation managed by Mise, or 'mise.toml' might not correctly specify Node.js.", Colors.WARNING)
             print_color("\nPlease try the following steps:", Colors.WARNING)
-            print_color("  1. Close this terminal window.", Colors.WARNING)
-            print_color("  2. Open a new terminal window.", Colors.WARNING)
-            print_color("  3. Navigate back to the Blinker project directory.", Colors.WARNING)
-            print_color("  4. Run 'python setup.py' again.", Colors.WARNING)
-            print_color("\nThe setup will resume using your saved configuration.", Colors.OKCYAN)
-            print_color("If 'npm' is still not found after restarting the terminal,", Colors.WARNING)
-            print_color("please ensure Node.js was correctly installed by Mise (you can check with 'mise ls' or 'mise doctor')", Colors.WARNING)
-            print_color("and that your system's PATH environment variable includes the necessary directories for Mise shims", Colors.WARNING)
-            print_color("(usually ~/.local/share/mise/shims on Linux/macOS, or check Mise documentation for Windows).", Colors.WARNING)
-            print_color("\nSetup cannot continue without a working npm.", Colors.FAIL)
+            print_color("  1. Ensure 'mise.toml' in your project root correctly defines a Node.js version (e.g., 'nodejs = \"lts\"').", Colors.WARNING)
+            print_color("  2. Run 'mise doctor' in your terminal to check for common issues with your Mise setup.", Colors.WARNING)
+            print_color("  3. Try running 'mise install' again manually in your terminal.", Colors.WARNING)
+            print_color("  4. As a next step, you might need to close this terminal, open a new one, navigate to the project directory, and re-run 'python setup.py'. This can help if PATH changes haven't taken effect.", Colors.WARNING)
+            print_color("  5. If problems persist, verify your system's PATH environment variable includes the Mise shims directory (usually ~/.local/share/mise/shims or similar).", Colors.WARNING)
+            print_color("\nSetup cannot continue without a working npm to install frontend dependencies.", Colors.FAIL)
             sys.exit(1)
-        print_color("npm check successful.", Colors.OKGREEN)
 
         print_color("\nInstalling Python dependencies from backend/requirements.txt. This may take several minutes depending on network speed and package complexity...", Colors.OKBLUE)
         run_command([sys.executable, "-m", "pip", "install", "-r", "backend/requirements.txt"], stream_output=True)
         print_color("Python dependencies installation complete.", Colors.OKGREEN)
 
         print_color("\nInstalling frontend Node.js dependencies from frontend/package.json. This can also take some time...", Colors.OKBLUE)
-        run_command(["npm", "install", "--prefix", "frontend"], stream_output=True, cwd=".")
+        run_command([npm_executable_path, "install", "--prefix", "frontend"], stream_output=True, cwd=".")
         print_color("Frontend dependencies installation complete.", Colors.OKGREEN)
 
         if global_config.get("SETUP_MODE") == "local":
@@ -435,7 +475,7 @@ def main():
             print_color("\nBuilding Docker images. This can take some time, especially on first run. Output below is from the build command...", Colors.OKBLUE)
             run_command(["docker-compose", "build"], stream_output=True)
             print_color("Docker images built. Starting services in detached mode...", Colors.OKBLUE)
-            run_command(["docker-compose", "up", "-d"]) # This typically doesn't stream much to stdout after start
+            run_command(["docker-compose", "up", "-d"])
             print_color("Docker containers started in background.", Colors.OKGREEN)
 
             print_color("\nMonitoring container startup...", Colors.OKBLUE); time.sleep(5)
