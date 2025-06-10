@@ -80,15 +80,15 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      args: # Add this section
+      args:
         - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
         - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
-        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} # Add this line
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
     ports:
       - "3000:3000"
     # volumes:
       # - ./frontend/.env.local:/app/.env.local:ro # Removed
-    env_file: # Added to load root .env
+    env_file:
       - .env
     environment:
       - NODE_ENV=production
