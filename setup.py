@@ -494,6 +494,7 @@ def main():
 
         print_color("\n--- Generating .env file ---", Colors.HEADER)
         env_vars = {
+            "SUPABASE_URL": global_config.get('SUPABASE_URL'), # Add this line
             "NEXT_PUBLIC_SUPABASE_URL": global_config.get('SUPABASE_URL'),
             "NEXT_PUBLIC_SUPABASE_ANON_KEY": global_config.get('SUPABASE_ANON_KEY'),
             "SUPABASE_SERVICE_ROLE_KEY": global_config.get('SUPABASE_SERVICE_ROLE_KEY'),
