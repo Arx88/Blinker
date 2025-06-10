@@ -240,7 +240,7 @@ def check_docker():
         return False
     try:
         run_command(["docker", "--version"], capture_output_default=True, text_default=True)
-        result = run_command(["sudo", "docker", "info"], capture_output_default=True, text_default=True, check=False)
+        result = run_command(["docker", "info"], capture_output_default=True, text_default=True, check=False)
         if result.returncode == 0:
             print_color("Docker is running.", Colors.OKGREEN)
             return True
