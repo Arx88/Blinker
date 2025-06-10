@@ -257,11 +257,10 @@ def check_docker():
 def check_mise():
     print_color("\n--- Step 2: Checking Mise ---", Colors.HEADER)
     print_color("Mise manages project-specific CLI versions.", Colors.OKCYAN)
-    mise_executable_path = os.path.expanduser("~/.local/bin/mise")
-    if os.path.exists(mise_executable_path):
-        print_color(f"Mise found at {mise_executable_path}.", Colors.OKGREEN)
+    if shutil.which("mise"):
+        print_color("Mise found.", Colors.OKGREEN)
         return True
-    print_color(f"Mise not found at {mise_executable_path}.", Colors.WARNING)
+    print_color("Mise not found.", Colors.WARNING)
     return False
 
 
@@ -514,16 +513,14 @@ def main():
 
         print_color("\nEnsuring correct tool versions with Mise. This might take a few moments...", Colors.OKBLUE)
         print_color("DEBUG: About to run mise install...", Colors.WARNING)
-        mise_executable_path = os.path.expanduser("~/.local/bin/mise")
-        run_command([mise_executable_path, "install"], stream_output=True)
+        run_command(["mise", "install"], stream_output=True)
         print_color("Mise tool versioning complete.", Colors.OKGREEN)
 
         print_color("\n--- Locating npm via mise ---", Colors.HEADER)
         npm_executable_path = ""
         try:
-            mise_executable_path = os.path.expanduser("~/.local/bin/mise")
             mise_which_result = run_command(
-                [mise_executable_path, "which", "npm"],
+                ["mise", "which", "npm"],
                 capture_output_default=True,
                 text_default=True,
                 check=False
