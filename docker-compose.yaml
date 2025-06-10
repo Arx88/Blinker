@@ -34,10 +34,10 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
-    volumes:
-      - ./backend/.env:/app/.env:ro
+    # volumes:
+      # - ./backend/.env:/app/.env:ro # Removed
     env_file:
-      - ./backend/.env
+      - .env # Changed to root .env
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
@@ -58,10 +58,10 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     command: python -m dramatiq run_agent_background
-    volumes:
-      - ./backend/.env:/app/.env:ro
+    # volumes:
+      # - ./backend/.env:/app/.env:ro # Removed
     env_file:
-      - ./backend/.env
+      - .env # Changed to root .env
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
@@ -82,8 +82,10 @@ services:
       dockerfile: Dockerfile
     ports:
       - "3000:3000"
-    volumes:
-      - ./frontend/.env.local:/app/.env.local:ro
+    # volumes:
+      # - ./frontend/.env.local:/app/.env.local:ro # Removed
+    env_file: # Added to load root .env
+      - .env
     environment:
       - NODE_ENV=production
     command: ["npm", "run", "start"]

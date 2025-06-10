@@ -1,145 +1,151 @@
-from daytona_sdk import Daytona, DaytonaConfig, CreateSandboxParams, Sandbox, SessionExecuteRequest
-from daytona_api_client.models.workspace_state import WorkspaceState
-from dotenv import load_dotenv
-from utils.logger import logger
-from utils.config import config
-from utils.config import Configuration
+import os
+from .abs_sandbox import AbstractSandbox
+from .docker_sandbox import DockerSandbox
+from .daytona_sandbox import DaytonaSandbox # Make sure this import is correct
 
-load_dotenv()
+# Attempt to import utils for logging, but make it optional for basic factory functioning
+try:
+    from utils.logger import logger
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
+    # Configure basic logging if utils.logger is not available
+    if not logger.handlers: # Avoid adding multiple handlers if this block is re-entered
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+    logger.info("utils.logger not found, using standard logging for sandbox factory.")
 
-logger.debug("Initializing Daytona sandbox configuration")
-daytona_config = DaytonaConfig(
-    api_key=config.DAYTONA_API_KEY,
-    server_url=config.DAYTONA_SERVER_URL,
-    target=config.DAYTONA_TARGET
-)
 
-if daytona_config.api_key:
-    logger.debug("Daytona API key configured successfully")
-else:
-    logger.warning("No Daytona API key found in environment variables")
+def get_sandbox(sandbox_id: str = None, auto_create: bool = False, project_id_label: str = None) -> AbstractSandbox:
+    '''
+    Factory function to get the appropriate sandbox implementation
+    based on the BLINKER_SETUP_MODE environment variable.
 
-if daytona_config.server_url:
-    logger.debug(f"Daytona server URL set to: {daytona_config.server_url}")
-else:
-    logger.warning("No Daytona server URL found in environment variables")
+    Args:
+        sandbox_id (str, optional): The ID of an existing sandbox to connect to.
+                                      For DockerSandbox, this can be the container name.
+        auto_create (bool, optional): If True, and sandbox_id is not found or not provided,
+                                      a new sandbox may be created. Defaults to False.
+                                      (Mainly relevant for DaytonaSandbox)
+        project_id_label (str, optional): A label used to identify or create the sandbox,
+                                          useful for Daytona to find/tag sandboxes.
+                                          (Mainly relevant for DaytonaSandbox)
+    '''
+    setup_mode = os.environ.get("BLINKER_SETUP_MODE", "local") # Default to local
+    logger.info(f"BLINKER_SETUP_MODE='{setup_mode}', determining sandbox type...")
 
-if daytona_config.target:
-    logger.debug(f"Daytona target set to: {daytona_config.target}")
-else:
-    logger.warning("No Daytona target found in environment variables")
+    if setup_mode == "daytona":
+        logger.info("Attempting to use DaytonaSandbox.")
+        try:
+            # Ensure DaytonaSandbox can be initialized without error if critical utils are missing
+            # This might involve checking for daytona_sdk presence earlier or handling it in DaytonaSandbox init
+            return DaytonaSandbox(sandbox_id=sandbox_id, auto_create=auto_create, project_id_label=project_id_label)
+        except ImportError as ie:
+            logger.error(f"ImportError for DaytonaSandbox dependencies (e.g., daytona_sdk, utils): {ie}")
+            raise RuntimeError(f"DaytonaSDK or utils missing, cannot use DaytonaSandbox: {ie}") from ie
+        except Exception as e:
+            logger.error(f"Failed to initialize DaytonaSandbox: {e}")
+            raise RuntimeError(f"Failed to initialize DaytonaSandbox as per BLINKER_SETUP_MODE: {e}") from e
 
-daytona = Daytona(daytona_config)
-logger.debug("Daytona client initialized")
+    elif setup_mode == "local":
+        logger.info("Attempting to use DockerSandbox.")
+        container_name_to_use = sandbox_id if sandbox_id else os.environ.get("DOCKER_SANDBOX_CONTAINER_NAME")
+        # If no sandbox_id (container_name) is provided, DockerSandbox uses its own default "blinker_sandbox_dev"
+        try:
+            if container_name_to_use:
+                return DockerSandbox(container_name=container_name_to_use)
+            else:
+                return DockerSandbox() # Uses default container name
+        except ImportError as ie:
+             logger.error(f"ImportError for DockerSandbox dependencies (e.g., docker lib): {ie}")
+             raise RuntimeError(f"Docker library missing, cannot use DockerSandbox: {ie}") from ie
+        except Exception as e:
+            logger.error(f"Failed to initialize DockerSandbox: {e}")
+            raise RuntimeError(f"Failed to initialize DockerSandbox: {e}") from e
 
-async def get_or_start_sandbox(sandbox_id: str):
-    """Retrieve a sandbox by ID, check its state, and start it if needed."""
-    
-    logger.info(f"Getting or starting sandbox with ID: {sandbox_id}")
-    
-    try:
-        sandbox = daytona.get_current_sandbox(sandbox_id)
-        
-        # Check if sandbox needs to be started
-        if sandbox.instance.state == WorkspaceState.ARCHIVED or sandbox.instance.state == WorkspaceState.STOPPED:
-            logger.info(f"Sandbox is in {sandbox.instance.state} state. Starting...")
-            try:
-                daytona.start(sandbox)
-                # Wait a moment for the sandbox to initialize
-                # sleep(5)
-                # Refresh sandbox state after starting
-                sandbox = daytona.get_current_sandbox(sandbox_id)
-                
-                # Start supervisord in a session when restarting
-                start_supervisord_session(sandbox)
-            except Exception as e:
-                logger.error(f"Error starting sandbox: {e}")
-                raise e
-        
-        logger.info(f"Sandbox {sandbox_id} is ready")
-        return sandbox
-        
-    except Exception as e:
-        logger.error(f"Error retrieving or starting sandbox: {str(e)}")
-        raise e
+    else: # Unknown mode
+        logger.warning(f"Unknown BLINKER_SETUP_MODE '{setup_mode}'. Defaulting to DockerSandbox.")
+        container_name_to_use = sandbox_id if sandbox_id else os.environ.get("DOCKER_SANDBOX_CONTAINER_NAME")
+        try:
+            if container_name_to_use:
+                return DockerSandbox(container_name=container_name_to_use)
+            else:
+                return DockerSandbox()
+        except ImportError as ie:
+             logger.error(f"ImportError for DockerSandbox dependencies (default): {ie}")
+             raise RuntimeError(f"Docker library missing, cannot use DockerSandbox (default): {ie}") from ie
+        except Exception as e:
+            logger.error(f"Failed to initialize DockerSandbox (default): {e}")
+            raise RuntimeError(f"Failed to initialize DockerSandbox (default): {e}") from e
 
-def start_supervisord_session(sandbox: Sandbox):
-    """Start supervisord in a session."""
-    session_id = "supervisord-session"
-    try:
-        logger.info(f"Creating session {session_id} for supervisord")
-        sandbox.process.create_session(session_id)
-        
-        # Execute supervisord command
-        sandbox.process.execute_session_command(session_id, SessionExecuteRequest(
-            command="exec /usr/bin/supervisord -n -c /etc/supervisor/conf.d/supervisord.conf",
-            var_async=True
-        ))
-        logger.info(f"Supervisord started in session {session_id}")
-    except Exception as e:
-        logger.error(f"Error starting supervisord session: {str(e)}")
-        raise e
+# Example usage (commented out, for testing):
+# if __name__ == '__main__':
+#     # Store original mode for restoration
+#     original_mode = os.environ.get('BLINKER_SETUP_MODE')
+#     try:
+#         print(f"Testing get_sandbox function...")
 
-def create_sandbox(password: str, project_id: str = None):
-    """Create a new sandbox with all required services configured and running."""
-    
-    logger.debug("Creating new Daytona sandbox environment")
-    logger.debug("Configuring sandbox with browser-use image and environment variables")
-    
-    labels = None
-    if project_id:
-        logger.debug(f"Using sandbox_id as label: {project_id}")
-        labels = {'id': project_id}
-        
-    params = CreateSandboxParams(
-        image=Configuration.SANDBOX_IMAGE_NAME,
-        public=True,
-        labels=labels,
-        env_vars={
-            "CHROME_PERSISTENT_SESSION": "true",
-            "RESOLUTION": "1024x768x24",
-            "RESOLUTION_WIDTH": "1024",
-            "RESOLUTION_HEIGHT": "768",
-            "VNC_PASSWORD": password,
-            "ANONYMIZED_TELEMETRY": "false",
-            "CHROME_PATH": "",
-            "CHROME_USER_DATA": "",
-            "CHROME_DEBUGGING_PORT": "9222",
-            "CHROME_DEBUGGING_HOST": "localhost",
-            "CHROME_CDP": ""
-        },
-        resources={
-            "cpu": 2,
-            "memory": 4,
-            "disk": 5,
-        },
-        auto_stop_interval=24 * 60
-    )
-    
-    # Create the sandbox
-    sandbox = daytona.create(params)
-    logger.debug(f"Sandbox created with ID: {sandbox.id}")
-    
-    # Start supervisord in a session for new sandbox
-    start_supervisord_session(sandbox)
-    
-    logger.debug(f"Sandbox environment successfully initialized")
-    return sandbox
+#         # Test local Docker mode
+#         print("\n--- Testing LOCAL mode ---")
+#         os.environ['BLINKER_SETUP_MODE'] = 'local'
+#         # For Docker, you might need a running container named "test_factory_sandbox"
+#         # e.g., docker run -d --name test_factory_sandbox alpine tail -f /dev/null
+#         # Ensure this container exists, or DockerSandbox will fail to start if it tries to get it by a specific name not running
+#         # If using default name in DockerSandbox ("blinker_sandbox_dev"), ensure that's running.
+#         # For this test, let's assume the default "blinker_sandbox_dev" or one specified by DOCKER_SANDBOX_CONTAINER_NAME is NOT required to exist beforehand
+#         # as DockerSandbox.start() might try to create it or use a predefined one from a compose file.
+#         # However, current DockerSandbox.start() TRIES to GET an existing container.
+#         # So, for this test to pass for 'local', a container (e.g. "blinker_sandbox_dev" or one from env var) must exist.
+#         # To make it runnable without pre-existing container:
+#         # 1. Create a dummy container: `docker run -d --name blinker_sandbox_dev alpine tail -f /dev/null`
+#         try:
+#             local_sandbox = get_sandbox() # Uses default name in DockerSandbox or env var
+#             print(f"Got local sandbox: {type(local_sandbox)}")
+#             local_sandbox.start() # Tries to connect to 'blinker_sandbox_dev' by default
+#             code, output = local_sandbox.execute_command("echo Hello from local sandbox")
+#             print(f"Local echo: {code} - {output}")
+#             # Clean up dummy container: `docker rm -f blinker_sandbox_dev`
+#         except Exception as e:
+#             print(f"Local mode test failed: {e}. This might be due to Docker not running, or container not found.")
+#             print("If container not found, try: docker run -d --name blinker_sandbox_dev alpine tail -f /dev/null")
 
-async def delete_sandbox(sandbox_id: str):
-    """Delete a sandbox by its ID."""
-    logger.info(f"Deleting sandbox with ID: {sandbox_id}")
-    
-    try:
-        # Get the sandbox
-        sandbox = daytona.get_current_sandbox(sandbox_id)
-        
-        # Delete the sandbox
-        daytona.remove(sandbox)
-        
-        logger.info(f"Successfully deleted sandbox {sandbox_id}")
-        return True
-    except Exception as e:
-        logger.error(f"Error deleting sandbox {sandbox_id}: {str(e)}")
-        raise e
 
+#         # Test Daytona mode (requires Daytona setup and utils.logger/config)
+#         print("\n--- Testing DAYTONA mode ---")
+#         # Ensure DAYTONA_API_KEY, DAYTONA_SERVER_URL, DAYTONA_TARGET are set in .env
+#         # and that utils.logger/config are in PYTHONPATH
+#         # Also, daytona_sdk must be installed.
+#         os.environ['BLINKER_SETUP_MODE'] = 'daytona'
+#         # This test will try to create a new sandbox if API keys are valid.
+#         # import uuid
+#         # test_daytona_project_id = f"factory_test_{uuid.uuid4().hex[:8]}"
+#         # try:
+#         #     daytona_sandbox_instance = get_sandbox(auto_create=True, project_id_label=test_daytona_project_id)
+#         #     print(f"Got Daytona sandbox: {type(daytona_sandbox_instance)}")
+#         #     daytona_sandbox_instance.start()
+#         #     code, output = daytona_sandbox_instance.execute_command("echo Hello from Daytona")
+#         #     print(f"Daytona echo: {code} - {output}")
+#         #     if hasattr(daytona_sandbox_instance, 'delete'):
+#         #        daytona_sandbox_instance.delete()
+#         #        print(f"Cleaned up Daytona sandbox for project: {test_daytona_project_id}")
+#         # except Exception as e:
+#         #     print(f"Daytona mode test failed: {e}. Check Daytona config, server, and SDK installation.")
+#         #     print("Ensure DAYTONA_API_KEY, DAYTONA_SERVER_URL, DAYTONA_TARGET are set.")
+#         #     print("And 'utils' path is correct for logger/config, and 'daytona_sdk' is installed.")
+
+#     except RuntimeError as re:
+#         print(f"Runtime error during sandbox testing: {re}")
+#     except ImportError as ie:
+#         print(f"Import error during factory test setup: {ie}")
+#     except Exception as e:
+#         print(f"An unexpected error occurred during factory test: {e}")
+#     finally:
+#         # Restore original mode
+#         if original_mode is None:
+#             os.environ.pop('BLINKER_SETUP_MODE', None)
+#         else:
+#             os.environ['BLINKER_SETUP_MODE'] = original_mode
+#         print("\nTest finished.")

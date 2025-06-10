@@ -92,28 +92,16 @@ The setup process includes:
 
 ### Quick Start
 
-1. **Clone the repository**:
-
-```bash
-git clone https://github.com/kortix-ai/suna.git
-cd suna
-```
-
-2. **Run the setup wizard**:
-
-```bash
-python setup.py
-```
-
-3. **Start or stop the containers**:
-
-```bash
-python start.py
-```
-
-### Manual Setup
-
-See the [Self-Hosting Guide](./docs/SELF-HOSTING.md) for detailed manual setup instructions.
+1.  **Clone the repository**:
+    ```bash
+    git clone https://github.com/kortix-ai/suna.git
+    cd suna
+    ```
+2.  **Run the setup script**:
+    ```bash
+    python setup.py
+    ```
+    This script will guide you through the installation and configuration process, including choosing your preferred setup mode (Local Docker-based or Daytona). It will also handle starting the application.
 
 The wizard will guide you through all necessary steps to get your Suna instance up and running. For detailed instructions, troubleshooting tips, and advanced configuration options, see the [Self-Hosting Guide](./SELF-HOSTING.md).
 
