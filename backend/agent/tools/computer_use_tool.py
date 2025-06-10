@@ -8,7 +8,10 @@ from typing import Optional, Dict
 import os
 
 from agentpress.tool import Tool, ToolResult, openapi_schema, xml_schema
-from sandbox.tool_base import SandboxToolsBase, Sandbox
+from agentpress.thread_manager import ThreadManager # Added for __init__ type hint
+from sandbox.tool_base import SandboxToolsBase
+# from sandbox.tool_base import Sandbox # No longer Sandbox direct type
+from sandbox.abs_sandbox import AbstractSandbox # Correct import for AbstractSandbox
 
 KEYBOARD_KEYS = [
     'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
@@ -25,16 +28,30 @@ KEYBOARD_KEYS = [
 class ComputerUseTool(SandboxToolsBase):
     """Computer automation tool for controlling the sandbox browser and GUI."""
     
-    def __init__(self, sandbox: Sandbox):
+    def __init__(self, project_id: str, thread_manager: Optional[ThreadManager] = None): # Updated signature
         """Initialize automation tool with sandbox connection."""
-        super().__init__(sandbox)
+        super().__init__(project_id, thread_manager) # Corrected super call
         self.session = None
         self.mouse_x = 0  # Track current mouse position
         self.mouse_y = 0
-        # Get automation service URL using port 8000
-        self.api_base_url = self.sandbox.get_preview_link(8000)
-        logging.info(f"Initialized Computer Use Tool with API URL: {self.api_base_url}")
+        # self.api_base_url will be set after _ensure_sandbox is called.
+        self.api_base_url: Optional[str] = None
+        # logging.info(f"Initialized Computer Use Tool. API URL will be set on first API request.") # Defer logging until URL is known
     
+    async def _ensure_api_base_url(self):
+        """Ensures the sandbox is started and api_base_url is set."""
+        if self.api_base_url is None:
+            await self._ensure_sandbox() # This ensures self.sandbox is available
+            if self.sandbox: # Check if sandbox was successfully initialized
+                # Assuming get_preview_link is part of AbstractSandbox or handled by the concrete implementation
+                preview_link_obj = self.sandbox.get_preview_link(8000) # Port 8000 for the automation service
+                self.api_base_url = preview_link_obj.url if hasattr(preview_link_obj, 'url') else str(preview_link_obj)
+                logging.info(f"Computer Use Tool API URL set to: {self.api_base_url}")
+            else:
+                # This case should ideally be prevented by _ensure_sandbox raising an error if it fails
+                logging.error("Sandbox could not be initialized, API base URL cannot be set.")
+                raise RuntimeError("Sandbox not available, cannot determine API base URL for ComputerUseTool.")
+
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session for API requests."""
         if self.session is None or self.session.closed:
@@ -44,8 +61,12 @@ class ComputerUseTool(SandboxToolsBase):
     async def _api_request(self, method: str, endpoint: str, data: Optional[Dict] = None) -> Dict:
         """Send request to automation service API."""
         try:
+            await self._ensure_api_base_url() # Ensure API base URL is set
+            if not self.api_base_url:
+                return {"success": False, "error": "API base URL not configured or sandbox unavailable."}
+
             session = await self._get_session()
-            url = f"{self.api_base_url}/api{endpoint}"
+            url = f"{self.api_base_url}/api{endpoint}" # self.api_base_url should now be set
             
             logging.debug(f"API request: {method} {url} {data}")
             

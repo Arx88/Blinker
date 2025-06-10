@@ -203,7 +203,11 @@ class SandboxShellTool(SandboxToolsBase):
         session_id = await self._ensure_session("raw_commands")
         
         # Execute command in session
-        from sandbox.sandbox import SessionExecuteRequest
+        # TODO: Review SessionExecuteRequest for DockerSandbox compatibility.
+        # This is currently Daytona-specific. If DockerSandbox needs a different
+        # way to manage raw command execution or doesn't use sessions in this way,
+        # this part of the tool (and potentially the session management) will need abstraction.
+        from daytona_sdk import SessionExecuteRequest
         req = SessionExecuteRequest(
             command=command,
             var_async=False,
