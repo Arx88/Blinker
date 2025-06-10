@@ -478,10 +478,19 @@ def main():
                 k_info['default_local'] = None  # No defaults for Daytona
         gestionar_grupo_config("Supabase", supabase_keys_info_updated, global_config, current_setup_mode)
 
+        daytona_keys_info = [
+            {"clave": "DAYTONA_API_KEY", "descripcion": "Daytona API Key", "es_secreto": True, "default_local": None, "default_daytona": None},
+            {"clave": "DAYTONA_SERVER_URL", "descripcion": "Daytona Server URL", "es_secreto": False, "default_local": None, "default_daytona": None},
+            {"clave": "DAYTONA_TARGET", "descripcion": "Daytona Target", "es_secreto": False, "default_local": None, "default_daytona": None}
+        ]
+        gestionar_grupo_config("Daytona", daytona_keys_info, global_config, current_setup_mode)
+
         print_color("\n--- Optional API Keys ---", Colors.HEADER)
         tools_api_keys = [
             {"name": "Zillow", "key": "RAPIDAPI_KEY_ZILLOW", "desc": "RapidAPI Key for Zillow"},
-            {"name": "Twitter", "key": "TWITTER_API_KEY", "desc": "Twitter API Key"}
+            {"name": "Twitter", "key": "TWITTER_API_KEY", "desc": "Twitter API Key"},
+            {"name": "Tavily", "key": "TAVILY_API_KEY", "desc": "Tavily API Key"},
+            {"name": "Firecrawl", "key": "FIRECRAWL_API_KEY", "desc": "Firecrawl API Key"}
         ]
         for tool_spec in tools_api_keys:
             prompt = f"Configure {tool_spec['name']} API Key? (Y/n): "
@@ -499,10 +508,20 @@ def main():
             "SUPABASE_SERVICE_ROLE_KEY": global_config.get('SUPABASE_SERVICE_ROLE_KEY'),
             "NEXT_PUBLIC_SUPABASE_URL": global_config.get('SUPABASE_URL'),
             "NEXT_PUBLIC_SUPABASE_ANON_KEY": global_config.get('SUPABASE_ANON_KEY'),
-            "BLINKER_SETUP_MODE": global_config.get('SETUP_MODE')
+            "BLINKER_SETUP_MODE": global_config.get('SETUP_MODE'),
+            "DAYTONA_API_KEY": global_config.get('DAYTONA_API_KEY'),
+            "DAYTONA_SERVER_URL": global_config.get('DAYTONA_SERVER_URL'),
+            "DAYTONA_TARGET": global_config.get('DAYTONA_TARGET'),
         }
+
+        if global_config.get('RAPIDAPI_KEY_ZILLOW'):
+            env_vars['RAPID_API_KEY'] = global_config.get('RAPIDAPI_KEY_ZILLOW')
+
         if global_config.get("SETUP_MODE") == "local":
             env_vars["NEXT_PUBLIC_API_URL"] = "http://localhost:8000"
+            env_vars["REDIS_HOST"] = "redis"
+            env_vars["REDIS_PASSWORD"] = ""
+
         for tool_spec in tools_api_keys:
             if tool_spec['key'] in global_config:
                 env_vars[tool_spec['key']] = global_config[tool_spec['key']]
