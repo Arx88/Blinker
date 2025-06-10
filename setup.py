@@ -39,7 +39,7 @@ def input_color(prompt_text, color_code=Colors.OKCYAN, input_color_code=Colors.E
 def _parse_pip_error_for_failed_packages(stderr_output: str) -> List[str]:
     failed_packages = set()
     patterns = [
-        re.compile(r"Could not find a version that satisfies the requirement\s+([a-zA-Z0-9-_.]+\[?[a-zA-Z0-9-_.,]*]?|[a-zA-Z0-9-_.]+)"), # Added comma
+        re.compile(r"Could not find a version that satisfies the requirement\s+([a-zA-Z0-9-_.]+\[?[a-zA-Z0-9-_.,]*]?|[a-zA-Z0-9-_.]+)"), # Comma was confirmed here
         re.compile(r"No matching distribution found for\s+([a-zA-Z0-9-_.]+\[?[a-zA-Z0-9-_.,]*]?|[a-zA-Z0-9-_.]+)"),
     ]
     for line in stderr_output.splitlines():
@@ -93,8 +93,7 @@ def run_command(command: List[str] | str, check=True, shell=False, cwd=None,
                 text=True,
                 encoding='utf-8',
                 errors='replace',
-                bufsize=1, # This makes it line-buffered if text=True. For char-by-char, text=False and manual decode might be needed for some platforms.
-                           # However, text=True and bufsize=1 with read(1) on stdout often works.
+                bufsize=1,
                 shell=shell,
                 cwd=cwd,
                 executable=executable_path if shell else None
@@ -103,16 +102,16 @@ def run_command(command: List[str] | str, check=True, shell=False, cwd=None,
             streamed_stdout_chars = []
             if process.stdout:
                 while True:
-                    char = process.stdout.read(1) # Attempt to read one character
-                    if char == '' and process.poll() is not None: # End of stream and process has finished
+                    char = process.stdout.read(1)
+                    if char == '' and process.poll() is not None:
                         break
                     if char:
                         print(char, end='', flush=True)
                         streamed_stdout_chars.append(char)
-                    else: # No char, process might still be running or finished between poll() and read(1)
-                        if process.poll() is not None: # Check again if process exited
+                    else:
+                        if process.poll() is not None:
                             break
-                        time.sleep(0.001) # Small sleep to prevent tight loop if process is genuinely paused or slow
+                        time.sleep(0.001)
                 process.stdout.close()
 
             streamed_stdout_str = "".join(streamed_stdout_chars)
@@ -499,5 +498,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+[end of setup.py]
 
 [end of setup.py]
