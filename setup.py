@@ -79,33 +79,62 @@ def run_command(command: List[str] | str, check=True, shell=False, cwd=None,
                       (actual_cmd_for_popen_or_run[0] == sys.executable and "-m" in actual_cmd_for_popen_or_run and "pip" in actual_cmd_for_popen_or_run)) and \
                      "install" in actual_cmd_for_popen_or_run
 
-    # This print statement was moved down after the Popen specific message for streaming
-    # print_color(f"Executing: {cmd_to_log}", Colors.OKBLUE)
-
     try:
         if stream_output or is_pip_install:
             if is_pip_install:
                 print_color(f"Executing & Streaming output for pip install: {cmd_to_log}", Colors.OKBLUE)
             elif stream_output:
                 print_color(f"Executing & Streaming output for: {cmd_to_log}", Colors.OKBLUE)
-            else: # Should not happen if logic is correct, but for safety:
-                print_color(f"Executing: {cmd_to_log}", Colors.OKBLUE)
 
             process = subprocess.Popen(
                 actual_cmd_for_popen_or_run,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
+                text=True, # Keep True for consistent decoding, Popen handles it.
+                encoding='utf-8', # Be explicit about encoding
+                errors='replace', # Handle potential decoding errors gracefully
+                bufsize=1, # Line-buffered for stdout is often a good compromise. Char-by-char can be slow.
                 shell=shell,
                 cwd=cwd,
                 executable=executable_path if shell else None
             )
 
+            # stdout streaming:
+            output_lines = []
             if process.stdout:
-                for line in iter(process.stdout.readline, ''):
-                    print(line, end='')
+                # For char-by-char streaming (might be slow for high-volume output):
+                # while True:
+                #     char = process.stdout.read(1)
+                #     if char == '' and process.poll() is not None:
+                #         break
+                #     if char:
+                #         print(char, end='', flush=True)
+                #         output_lines.append(char)
+                #     # Add a small sleep if char is empty but process is running to avoid tight loop
+                #     # This can make it less CPU intensive but also slower for fast output.
+                #     # A balance might be needed, or conditional sleep.
+                #     elif process.poll() is None: # process still running but no char
+                #         time.sleep(0.001) # very short sleep
+
+            # Character-by-character streaming
+            output_chars = []
+            if process.stdout:
+                while True:
+                    char = process.stdout.read(1)
+                    if char == '' and process.poll() is not None: # End of stream and process finished
+                        break
+                    if char:
+                        print(char, end='', flush=True)
+                        output_chars.append(char)
+                    else: # No char, process might still be running (e.g., waiting for input, network)
+                          # or it might have exited between poll() and read(1)
+                        if process.poll() is not None: # Check again if process exited
+                            break
+                        time.sleep(0.001) # Small sleep to prevent tight loop if process is genuinely paused
+
                 process.stdout.close()
+
+            streamed_stdout_str = "".join(output_chars)
 
             stderr_output = ""
             if process.stderr:
@@ -137,12 +166,12 @@ def run_command(command: List[str] | str, check=True, shell=False, cwd=None,
                 elif stderr_output:
                      print_color(f"Error output:\n{stderr_output.strip()}", Colors.FAIL)
 
-                raise subprocess.CalledProcessError(return_code, actual_cmd_for_popen_or_run, output="<stdout streamed>", stderr=stderr_output)
+                raise subprocess.CalledProcessError(return_code, actual_cmd_for_popen_or_run, output=streamed_stdout_str, stderr=stderr_output)
 
-            return subprocess.CompletedProcess(actual_cmd_for_popen_or_run, return_code, stdout="<stdout streamed>", stderr=stderr_output)
+            return subprocess.CompletedProcess(actual_cmd_for_popen_or_run, return_code, stdout=streamed_stdout_str, stderr=stderr_output)
 
         else:
-            print_color(f"Executing: {cmd_to_log}", Colors.OKBLUE) # Print for non-streamed commands here
+            print_color(f"Executing: {cmd_to_log}", Colors.OKBLUE)
             effective_capture_output = capture_output_default
             effective_text = text_default
             process_obj = subprocess.run(
@@ -218,25 +247,6 @@ def check_supabase_cli():
         return True
     print_color("Supabase CLI not found.", Colors.WARNING)
     return False
-
-# def check_npm(): # Commented out as per instruction
-#     print_color("\n--- Checking for npm (Node Package Manager) ---", Colors.HEADER)
-#     if not shutil.which("npm"):
-#         print_color("npm command not found in PATH.", Colors.FAIL)
-#         return False
-#     try:
-#         result = run_command(["npm", "--version"], check=False, capture_output_default=True, text_default=True)
-#         if result.returncode == 0:
-#             print_color(f"npm found. Version: {result.stdout.strip()}", Colors.OKGREEN)
-#             return True
-#         else:
-#             print_color(f"npm command found, but 'npm --version' failed with exit code {result.returncode}.", Colors.FAIL)
-#             if result.stderr:
-#                 print_color(f"npm --version error output: {result.stderr.strip()}", Colors.FAIL)
-#             return False
-#     except Exception as e:
-#         print_color(f"An error occurred while trying to run 'npm --version': {e}", Colors.FAIL)
-#         return False
 
 def install_mise(os_type):
     print_color("\nAttempting to install Mise...", Colors.OKBLUE)
@@ -398,19 +408,13 @@ def main():
         run_command(["mise", "install"], stream_output=True)
         print_color("Mise tool versioning complete.", Colors.OKGREEN)
 
-        # if not check_npm(): # Commented out as per instruction
-        #     print_color("\nMise has completed, but 'npm' (Node Package Manager) was not found or is not working in the current environment.", Colors.FAIL)
-        #     # ... (rest of the guidance block)
-        #     sys.exit(1)
-        # print_color("npm check successful.", Colors.OKGREEN)
-
         print_color("\n--- Locating npm via mise ---", Colors.HEADER)
         npm_executable_path = ""
         try:
             mise_which_result = run_command(
                 ["mise", "which", "npm"],
                 capture_output_default=True,
-                text_default=True, # Changed from text=True
+                text_default=True,
                 check=False
             )
 
@@ -422,7 +426,7 @@ def main():
                 npm_version_result = run_command(
                     [npm_executable_path, "--version"],
                     capture_output_default=True,
-                    text_default=True, # Changed from text=True
+                    text_default=True,
                     check=False
                 )
                 if npm_version_result.returncode == 0:
@@ -509,3 +513,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+[end of setup.py]
