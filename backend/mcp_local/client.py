@@ -21,7 +21,8 @@ try:
 except ImportError as e:
     raise ImportError(
         "Failed to import 'streamablehttp_client' from 'chuk_mcp.http_client'. "
-        "Please ensure 'chuk-mcp==0.1.12' is installed and provides this module. "
+        "Please ensure 'chuk-mcp==0.1.12' is installed and 'mcp[cli]~=1.0.0' is also installed. "
+        "This import path was determined from analysis of backend/list_mcp.py. "
         f"Original error: {e}"
     )
 
