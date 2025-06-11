@@ -345,7 +345,7 @@ def gestionar_config(clave: str, descripcion: str, es_secreto: bool,
                      ask_use_saved: bool = True) -> str:
     valor_actual = current_config.get(clave)
     if ask_use_saved and valor_actual is not None:
-        display_val = '(hidden)' if es_secreto else f"'{valor_actual}'"
+        display_val = f"'{valor_actual}'" # Changed here
         prompt_text = f"Saved value for {descripcion} ({display_val}). Use it? (Y/n): "
         if input_color(prompt_text, Colors.WARNING).strip().lower() in ['y', '']:
             return valor_actual
@@ -511,26 +511,30 @@ def main():
             "NEXT_PUBLIC_SUPABASE_ANON_KEY": global_config.get('SUPABASE_ANON_KEY'),
             "BLINKER_SETUP_MODE": global_config.get('SETUP_MODE'),
             "DAYTONA_API_KEY": global_config.get('DAYTONA_API_KEY'), # Included here, might be None if not Daytona mode
-            "DAYTONA_SERVER_URL": global_config.get('DAYTONA_SERVER_URL'), # Included here
-            "DAYTONA_TARGET": global_config.get('DAYTONA_TARGET'), # Included here
+            "DAYTONA_API_KEY": global_config.get('DAYTONA_API_KEY'),
+            "DAYTONA_SERVER_URL": global_config.get('DAYTONA_SERVER_URL'),
+            "DAYTONA_TARGET": global_config.get('DAYTONA_TARGET'),
         }
 
         if current_setup_mode == "daytona":
-            # These are already included above, this block ensures they are sourced if daytona mode
-            # and potentially allows for specific daytona-mode modifications if needed in the future.
-            # For now, it's redundant with the above but matches the requested logic structure.
             env_vars["DAYTONA_API_KEY"] = global_config.get('DAYTONA_API_KEY')
             env_vars["DAYTONA_SERVER_URL"] = global_config.get('DAYTONA_SERVER_URL')
             env_vars["DAYTONA_TARGET"] = global_config.get('DAYTONA_TARGET')
         elif current_setup_mode == "local":
-            env_vars["DAYTONA_API_KEY"] = ""  # Empty string for local mode
-            env_vars["DAYTONA_SERVER_URL"] = "" # Empty string for local mode
-            env_vars["DAYTONA_TARGET"] = ""   # Empty string for local mode
+            env_vars["DAYTONA_API_KEY"] = ""
+            env_vars["DAYTONA_SERVER_URL"] = ""
+            env_vars["DAYTONA_TARGET"] = ""
 
-        if global_config.get('RAPIDAPI_KEY_ZILLOW'):
-            env_vars['RAPID_API_KEY'] = global_config.get('RAPIDAPI_KEY_ZILLOW')
+        rapid_api_zillow_val = global_config.get('RAPIDAPI_KEY_ZILLOW')
+        env_vars['RAPID_API_KEY'] = rapid_api_zillow_val if rapid_api_zillow_val is not None else ""
 
-        if global_config.get("SETUP_MODE") == "local": # This is current_setup_mode
+        tavily_api_key_val = global_config.get('TAVILY_API_KEY')
+        env_vars['TAVILY_API_KEY'] = tavily_api_key_val if tavily_api_key_val is not None else ""
+
+        firecrawl_api_key_val = global_config.get('FIRECRAWL_API_KEY')
+        env_vars['FIRECRAWL_API_KEY'] = firecrawl_api_key_val if firecrawl_api_key_val is not None else ""
+
+        if global_config.get("SETUP_MODE") == "local":
             env_vars["NEXT_PUBLIC_API_URL"] = "http://localhost:8000"
             env_vars["REDIS_HOST"] = "redis"
             env_vars["REDIS_PASSWORD"] = ""
