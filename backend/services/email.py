@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 class EmailService:
     def __init__(self):
-        self.api_token = os.getenv('MAILTRAP_API_TOKEN')
+        self.api_token = config.MAILTRAP_API_TOKEN
         self.sender_email = os.getenv('MAILTRAP_SENDER_EMAIL', 'dom@kortix.ai')
         self.sender_name = os.getenv('MAILTRAP_SENDER_NAME', 'Suna Team')
         
