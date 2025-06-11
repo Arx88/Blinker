@@ -109,6 +109,7 @@ class SandboxToolsBase(Tool):
                 raise RuntimeError(f"Failed to obtain a sandbox instance for project {self.project_id}.")
 
         return self._sandbox
+    # End of _ensure_sandbox method
 
     @property
     def sandbox(self) -> AbstractSandbox: # Updated return type hint
@@ -118,32 +119,6 @@ class SandboxToolsBase(Tool):
             # For synchronous access, this property might not be suitable if _ensure_sandbox is async.
             # However, tools using this property should have already called and awaited _ensure_sandbox.
             raise RuntimeError("Sandbox not initialized. Call and await _ensure_sandbox() first in an async context.")
-        return self._sandbox
-
-    @property
-                #     vnc_link = self._sandbox.get_preview_link(6080)
-                #     website_link = self._sandbox.get_preview_link(8080)
-                    
-                #     vnc_url = vnc_link.url if hasattr(vnc_link, 'url') else str(vnc_link)
-                #     website_url = website_link.url if hasattr(website_link, 'url') else str(website_link)
-                    
-                #     print("\033[95m***")
-                #     print(f"VNC URL: {vnc_url}")
-                #     print(f"Website URL: {website_url}")
-                #     print("***\033[0m")
-                #     SandboxToolsBase._urls_printed = True
-                
-            except Exception as e:
-                logger.error(f"Error retrieving sandbox for project {self.project_id}: {str(e)}", exc_info=True)
-                raise e
-        
-        return self._sandbox
-
-    @property
-    def sandbox(self) -> Sandbox:
-        """Get the sandbox instance, ensuring it exists."""
-        if self._sandbox is None:
-            raise RuntimeError("Sandbox not initialized. Call _ensure_sandbox() first.")
         return self._sandbox
 
     @property
