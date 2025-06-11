@@ -1,3 +1,7 @@
+import sys, os
+# Esto añade el directorio raíz del proyecto a la ruta de búsqueda de Python
+# para solucionar los ModuleNotFoundError.
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from fastapi import FastAPI, Request, HTTPException, Response, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
