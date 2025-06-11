@@ -16,20 +16,25 @@ from dataclasses import dataclass
 # Import MCP components according to the official SDK
 from mcp import ClientSession
 try:
-    from mcp.client.streamable_http import streamablehttp_client
+    # Attempt 1: from mcp.client.http (common pattern for http clients)
+    from mcp.client.http import streamablehttp_client
 except ImportError:
-    # Fallback import if the module structure is different
     try:
-        from mcp.client import streamablehttp_client
+        # Attempt 2: Original first path
+        from mcp.client.streamable_http import streamablehttp_client
     except ImportError:
         try:
-            # Third attempt: directly from mcp
-            from mcp import streamablehttp_client
+            # Attempt 3: Original second path
+            from mcp.client import streamablehttp_client
         except ImportError:
-            raise ImportError(
-                "Could not import streamablehttp_client from common locations (mcp.client.streamable_http, mcp.client, or mcp). "
-                "Make sure you have installed mcp with: pip install 'mcp[cli]' and that the 'streamablehttp_client' is available in one of these paths for the installed mcp version."
-            )
+            try:
+                # Attempt 4: Original third path
+                from mcp import streamablehttp_client
+            except ImportError:
+                raise ImportError(
+                    "Could not import streamablehttp_client from common locations (mcp.client.http, mcp.client.streamable_http, mcp.client, or mcp). "
+                    "Make sure you have installed mcp with: pip install 'mcp[cli]' and that the 'streamablehttp_client' is available in one of these paths for the installed mcp version."
+                )
 
 # Import types - these should be in mcp.types according to the docs
 try:
