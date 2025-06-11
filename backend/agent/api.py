@@ -832,6 +832,7 @@ async def initiate_agent_with_files(
     user_id: str = Depends(get_current_user_id_from_jwt)
 ):
     """Initiate a new agent session with optional file attachments."""
+    logger.info(f"ENDPOINT HIT: /api/agent/initiate (User ID: {user_id}, Instance: {instance_id}) with prompt: '{prompt[:50]}...' and {len(files)} files. Model: {model_name}, Agent ID: {agent_id}")
     global instance_id # Ensure instance_id is accessible
     if not instance_id:
         raise HTTPException(status_code=500, detail="Agent API not initialized with instance ID")
@@ -880,6 +881,7 @@ async def initiate_agent_with_files(
     if not can_run:
         raise HTTPException(status_code=402, detail={"message": message, "subscription": subscription})
 
+    logger.info(f"Initiate Agent - User: {user_id} - Starting resource creation (Project, Sandbox, Thread).")
     try:
         # 1. Create Project
         placeholder_name = f"{prompt[:30]}..." if len(prompt) > 30 else prompt
@@ -888,7 +890,7 @@ async def initiate_agent_with_files(
             "created_at": datetime.now(timezone.utc).isoformat()
         }).execute()
         project_id = project.data[0]['project_id']
-        logger.info(f"Created new project: {project_id}")
+        logger.info(f"Initiate Agent - User: {user_id} - Project created: {project_id}")
 
         # 2. Create Sandbox
         sandbox_id = None
@@ -896,7 +898,7 @@ async def initiate_agent_with_files(
           sandbox_pass = str(uuid.uuid4())
           sandbox = create_sandbox(sandbox_pass, project_id)
           sandbox_id = sandbox.id
-          logger.info(f"Created new sandbox {sandbox_id} for project {project_id}")
+          logger.info(f"Initiate Agent - User: {user_id} - Sandbox created: {sandbox_id} for project {project_id}")
           
           # Get preview links
           vnc_link = sandbox.get_preview_link(6080)
@@ -924,6 +926,7 @@ async def initiate_agent_with_files(
                 'sandbox_url': website_url, 'token': token
             }
         }).eq('project_id', project_id).execute()
+        logger.info(f"Initiate Agent - User: {user_id} - Project {project_id} updated with sandbox info for {sandbox_id}")
 
         if not update_result.data:
             logger.error(f"Failed to update project {project_id} with new sandbox {sandbox_id}")
@@ -955,7 +958,7 @@ async def initiate_agent_with_files(
         
         thread = await client.table('threads').insert(thread_data).execute()
         thread_id = thread.data[0]['thread_id']
-        logger.info(f"Created new thread: {thread_id}")
+        logger.info(f"Initiate Agent - User: {user_id} - Thread created: {thread_id} for project {project_id}")
 
         # Trigger Background Naming Task
         asyncio.create_task(generate_and_update_project_name(project_id=project_id, prompt=prompt))
@@ -1025,6 +1028,7 @@ async def initiate_agent_with_files(
             "is_llm_message": True, "content": json.dumps(message_payload),
             "created_at": datetime.now(timezone.utc).isoformat()
         }).execute()
+        logger.info(f"Initiate Agent - User: {user_id} - Initial message added to thread {thread_id}")
 
         # 6. Start Agent Run
         agent_run = await client.table('agent_runs').insert({
@@ -1032,7 +1036,7 @@ async def initiate_agent_with_files(
             "started_at": datetime.now(timezone.utc).isoformat()
         }).execute()
         agent_run_id = agent_run.data[0]['id']
-        logger.info(f"Created new agent run: {agent_run_id}")
+        logger.info(f"Initiate Agent - User: {user_id} - Agent run created: {agent_run_id} for thread {thread_id}")
 
         # Register run in Redis
         instance_key = f"active_run:{instance_id}:{agent_run_id}"
@@ -1053,10 +1057,11 @@ async def initiate_agent_with_files(
             target_agent_id=target_agent_id
         )
 
+        logger.info(f"Initiate Agent - User: {user_id} - Successfully initiated agent. Returning Thread ID: {thread_id}, Agent Run ID: {agent_run_id}")
         return {"thread_id": thread_id, "agent_run_id": agent_run_id}
 
     except Exception as e:
-        logger.error(f"Error in agent initiation: {str(e)}\n{traceback.format_exc()}")
+        logger.error(f"Initiate Agent - User: {user_id} - ERROR: {str(e)} - Traceback: {traceback.format_exc()}")
         # TODO: Clean up created project/thread if initiation fails mid-way
         raise HTTPException(status_code=500, detail=f"Failed to initiate agent session: {str(e)}")
 
