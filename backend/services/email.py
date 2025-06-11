@@ -13,7 +13,7 @@ class EmailService:
         self.sender_name = os.getenv('MAILTRAP_SENDER_NAME', 'Suna Team')
         
         if not self.api_token:
-            logger.warning("MAILTRAP_API_TOKEN not found in environment variables")
+            logger.warning("MAILTRAP_API_TOKEN not found in environment variables. Email services will be disabled. Please configure it in your .env file (you can use backend/.env.example as a template).")
             self.client = None
         else:
             self.client = mt.MailtrapClient(token=self.api_token)
