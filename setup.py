@@ -491,7 +491,8 @@ def main():
             {"name": "Zillow", "key": "RAPIDAPI_KEY_ZILLOW", "desc": "RapidAPI Key for Zillow"},
             {"name": "Twitter", "key": "TWITTER_API_KEY", "desc": "Twitter API Key"},
             {"name": "Tavily", "key": "TAVILY_API_KEY", "desc": "Tavily API Key"},
-            {"name": "Firecrawl", "key": "FIRECRAWL_API_KEY", "desc": "Firecrawl API Key"}
+            {"name": "Firecrawl", "key": "FIRECRAWL_API_KEY", "desc": "Firecrawl API Key"},
+            {"name": "Anthropic", "key": "ANTHROPIC_API_KEY", "desc": "Anthropic API Key"} # New entry
         ]
         for tool_spec in tools_api_keys:
             prompt = f"Configure {tool_spec['name']} API Key? (Y/n): "
@@ -533,6 +534,9 @@ def main():
 
         firecrawl_api_key_val = global_config.get('FIRECRAWL_API_KEY')
         env_vars['FIRECRAWL_API_KEY'] = firecrawl_api_key_val if firecrawl_api_key_val is not None else ""
+
+        anthropic_api_key_val = global_config.get('ANTHROPIC_API_KEY')
+        env_vars['ANTHROPIC_API_KEY'] = anthropic_api_key_val if anthropic_api_key_val is not None else ""
 
         if global_config.get("SETUP_MODE") == "local":
             env_vars["NEXT_PUBLIC_API_URL"] = "http://localhost:8000"
