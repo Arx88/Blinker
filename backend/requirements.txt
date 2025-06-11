@@ -22,7 +22,6 @@ pyjwt==2.10.1
 exa-py>=1.9.1
 e2b-code-interpreter>=1.2.0
 certifi==2024.2.2
-chuk-mcp==0.1.12
 python-ripgrep==0.0.6
 daytona_sdk==0.14.0
 boto3>=1.34.0
