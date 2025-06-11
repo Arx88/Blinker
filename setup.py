@@ -483,7 +483,8 @@ def main():
             {"clave": "DAYTONA_SERVER_URL", "descripcion": "Daytona Server URL", "es_secreto": False, "default_local": None, "default_daytona": None},
             {"clave": "DAYTONA_TARGET", "descripcion": "Daytona Target", "es_secreto": False, "default_local": None, "default_daytona": None}
         ]
-        gestionar_grupo_config("Daytona", daytona_keys_info, global_config, current_setup_mode)
+        if current_setup_mode == "daytona":
+            gestionar_grupo_config("Daytona", daytona_keys_info, global_config, current_setup_mode)
 
         print_color("\n--- Optional API Keys ---", Colors.HEADER)
         tools_api_keys = [
@@ -509,15 +510,27 @@ def main():
             "NEXT_PUBLIC_SUPABASE_URL": global_config.get('SUPABASE_URL'),
             "NEXT_PUBLIC_SUPABASE_ANON_KEY": global_config.get('SUPABASE_ANON_KEY'),
             "BLINKER_SETUP_MODE": global_config.get('SETUP_MODE'),
-            "DAYTONA_API_KEY": global_config.get('DAYTONA_API_KEY'),
-            "DAYTONA_SERVER_URL": global_config.get('DAYTONA_SERVER_URL'),
-            "DAYTONA_TARGET": global_config.get('DAYTONA_TARGET'),
+            "DAYTONA_API_KEY": global_config.get('DAYTONA_API_KEY'), # Included here, might be None if not Daytona mode
+            "DAYTONA_SERVER_URL": global_config.get('DAYTONA_SERVER_URL'), # Included here
+            "DAYTONA_TARGET": global_config.get('DAYTONA_TARGET'), # Included here
         }
+
+        if current_setup_mode == "daytona":
+            # These are already included above, this block ensures they are sourced if daytona mode
+            # and potentially allows for specific daytona-mode modifications if needed in the future.
+            # For now, it's redundant with the above but matches the requested logic structure.
+            env_vars["DAYTONA_API_KEY"] = global_config.get('DAYTONA_API_KEY')
+            env_vars["DAYTONA_SERVER_URL"] = global_config.get('DAYTONA_SERVER_URL')
+            env_vars["DAYTONA_TARGET"] = global_config.get('DAYTONA_TARGET')
+        elif current_setup_mode == "local":
+            env_vars["DAYTONA_API_KEY"] = ""  # Empty string for local mode
+            env_vars["DAYTONA_SERVER_URL"] = "" # Empty string for local mode
+            env_vars["DAYTONA_TARGET"] = ""   # Empty string for local mode
 
         if global_config.get('RAPIDAPI_KEY_ZILLOW'):
             env_vars['RAPID_API_KEY'] = global_config.get('RAPIDAPI_KEY_ZILLOW')
 
-        if global_config.get("SETUP_MODE") == "local":
+        if global_config.get("SETUP_MODE") == "local": # This is current_setup_mode
             env_vars["NEXT_PUBLIC_API_URL"] = "http://localhost:8000"
             env_vars["REDIS_HOST"] = "redis"
             env_vars["REDIS_PASSWORD"] = ""
