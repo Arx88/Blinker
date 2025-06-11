@@ -15,14 +15,13 @@ from dataclasses import dataclass
 
 # Import MCP components according to the official SDK
 from mcp import ClientSession
-# Import streamablehttp_client from chuk_mcp.http_client
+# Import streamablehttp_client from mcp.client.streamable_http_client as per user's definitive analysis
 try:
-    from chuk_mcp.http_client import streamablehttp_client
+    from mcp.client.streamable_http_client import streamablehttp_client
 except ImportError as e:
     raise ImportError(
-        "Failed to import 'streamablehttp_client' from 'chuk_mcp.http_client'. "
-        "Please ensure 'chuk-mcp==0.1.12' is installed and 'mcp[cli]~=1.0.0' is also installed. "
-        "This import path was determined from analysis of backend/list_mcp.py. "
+        "Failed to import 'streamablehttp_client' from 'mcp.client.streamable_http_client'. "
+        "Please ensure 'mcp[cli]~=1.0.0' is installed and provides this module at this specific path. " # Updated error message slightly for clarity
         f"Original error: {e}"
     )
 
