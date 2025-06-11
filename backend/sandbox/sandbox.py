@@ -81,6 +81,51 @@ def get_sandbox(sandbox_id: str = None, auto_create: bool = False, project_id_la
             logger.error(f"Failed to initialize DockerSandbox (default): {e}")
             raise RuntimeError(f"Failed to initialize DockerSandbox (default): {e}") from e
 
+
+def create_sandbox(sandbox_password: str, project_id: str) -> AbstractSandbox:
+    '''
+    Creates and starts a new sandbox.
+    The sandbox_password argument is kept for interface compatibility but might not be used
+    by all sandbox implementations (e.g., DaytonaSandbox handles its own password/auth).
+    '''
+    logger.info(f"Attempting to create and start sandbox for project ID: {project_id}")
+    # project_id is used as project_id_label for Daytona
+    sandbox_instance = get_sandbox(auto_create=True, project_id_label=project_id)
+    sandbox_instance.start()  # Ensures it's running
+    logger.info(f"Sandbox created and started with ID: {sandbox_instance.sandbox_id if hasattr(sandbox_instance, 'sandbox_id') else 'N/A'}")
+    return sandbox_instance
+
+def delete_sandbox(sandbox_id: str) -> None:
+    '''
+    Deletes an existing sandbox.
+    '''
+    logger.info(f"Attempting to delete sandbox with ID: {sandbox_id}")
+    # Get the sandbox instance without auto_create, it should exist.
+    sandbox_instance = get_sandbox(sandbox_id=sandbox_id, auto_create=False)
+    if hasattr(sandbox_instance, 'delete'):
+        sandbox_instance.delete()
+        logger.info(f"Sandbox with ID: {sandbox_id} delete call issued.")
+    else:
+        logger.warning(f"Sandbox instance for ID {sandbox_id} does not have a delete method. Type: {type(sandbox_instance)}")
+        # For DockerSandbox, deletion is usually handled outside (e.g. docker rm)
+        # but if we want an explicit stop, we can call it.
+        if hasattr(sandbox_instance, 'stop'):
+            sandbox_instance.stop()
+            logger.info(f"Sandbox with ID: {sandbox_id} was stopped as delete method was not available.")
+        # Consider if an error should be raised if delete is expected but not present.
+        # For now, logging a warning.
+
+def get_or_start_sandbox(sandbox_id: str) -> AbstractSandbox:
+    '''
+    Gets an existing sandbox and ensures it is started.
+    '''
+    logger.info(f"Attempting to get and start sandbox with ID: {sandbox_id}")
+    # auto_create is False because we expect the sandbox to exist.
+    sandbox_instance = get_sandbox(sandbox_id=sandbox_id, auto_create=False)
+    sandbox_instance.start() # Ensure it's running
+    logger.info(f"Sandbox with ID: {sandbox_id} retrieved and started.")
+    return sandbox_instance
+
 # Example usage (commented out, for testing):
 # if __name__ == '__main__':
 #     # Store original mode for restoration
