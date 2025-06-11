@@ -832,8 +832,8 @@ async def initiate_agent_with_files(
     user_id: str = Depends(get_current_user_id_from_jwt)
 ):
     """Initiate a new agent session with optional file attachments."""
-    logger.info(f"ENDPOINT HIT: /api/agent/initiate (User ID: {user_id}, Instance: {instance_id}) with prompt: '{prompt[:50]}...' and {len(files)} files. Model: {model_name}, Agent ID: {agent_id}")
     global instance_id # Ensure instance_id is accessible
+    logger.info(f"ENDPOINT HIT: /api/agent/initiate (User ID: {user_id}, Instance: {instance_id}) with prompt: '{prompt[:50]}...' and {len(files)} files. Model: {model_name}, Agent ID: {agent_id}")
     if not instance_id:
         raise HTTPException(status_code=500, detail="Agent API not initialized with instance ID")
 
