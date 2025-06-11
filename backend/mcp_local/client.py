@@ -21,7 +21,7 @@ try:
 except ImportError as e:
     raise ImportError(
         "Failed to import 'streamablehttp_client' from 'chuk_mcp.client.streamable_http'. "
-        "Please ensure that 'chuk-mcp' is installed correctly in your environment (expected version 1.0.1). "
+        "Please ensure that 'chuk-mcp' is installed correctly in your environment (expected version 0.1.12). "
         f"Original error: {e}"
     )
 
