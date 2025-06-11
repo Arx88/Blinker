@@ -9,7 +9,7 @@ from fastapi import HTTPException # type: ignore
 from utils.logger import logger
 from mcp import ClientSession
 from mcp.client.sse import sse_client # type: ignore
-from mcp.client.streamable_http import streamablehttp_client # type: ignore
+from mcp_local.client import streamablehttp_client # type: ignore
 
 async def connect_streamable_http_server(url):
     async with streamablehttp_client(url) as (
