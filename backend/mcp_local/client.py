@@ -22,10 +22,14 @@ except ImportError:
     try:
         from mcp.client import streamablehttp_client
     except ImportError:
-        raise ImportError(
-            "Could not import streamablehttp_client. "
-            "Make sure you have installed mcp with: pip install 'mcp[cli]'"
-        )
+        try:
+            # Third attempt: directly from mcp
+            from mcp import streamablehttp_client
+        except ImportError:
+            raise ImportError(
+                "Could not import streamablehttp_client from common locations (mcp.client.streamable_http, mcp.client, or mcp). "
+                "Make sure you have installed mcp with: pip install 'mcp[cli]' and that the 'streamablehttp_client' is available in one of these paths for the installed mcp version."
+            )
 
 # Import types - these should be in mcp.types according to the docs
 try:
