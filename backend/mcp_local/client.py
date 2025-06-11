@@ -15,23 +15,15 @@ from dataclasses import dataclass
 
 # Import MCP components according to the official SDK
 from mcp import ClientSession
+# Correct and direct import for streamablehttp_client
 try:
-    # Attempt 1: from chuk_mcp.streamable_http
-    from chuk_mcp.streamable_http import streamablehttp_client
-except ImportError:
-    try:
-        # Attempt 2: from chuk_mcp directly
-        from chuk_mcp import streamablehttp_client
-    except ImportError:
-        try:
-            # Attempt 3: from chuk_mcp.client.streamable_http (original suggestion that failed on chuk_mcp.client)
-            from chuk_mcp.client.streamable_http import streamablehttp_client
-        except ImportError:
-            # If all attempts to import from chuk_mcp fail, raise an error.
-            raise ImportError(
-                "Could not import streamablehttp_client from chuk_mcp (tried chuk_mcp.streamable_http, chuk_mcp, chuk_mcp.client.streamable_http). "
-                "Please ensure 'chuk-mcp' is installed correctly and 'streamablehttp_client' is available in one of these paths within the 'chuk_mcp' package."
-            )
+    from chuk_mcp.client.streamable_http import streamablehttp_client
+except ImportError as e:
+    raise ImportError(
+        "Failed to import 'streamablehttp_client' from 'chuk_mcp.client.streamable_http'. "
+        "Please ensure that 'chuk-mcp' is installed correctly in your environment (expected version 1.0.1). "
+        f"Original error: {e}"
+    )
 
 # Import types - these should be in mcp.types according to the docs
 try:
