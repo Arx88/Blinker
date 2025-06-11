@@ -16,29 +16,22 @@ from dataclasses import dataclass
 # Import MCP components according to the official SDK
 from mcp import ClientSession
 try:
-    # Attempt 1: from chuk_mcp (new location after refactor)
-    from chuk_mcp.client.streamable_http import streamablehttp_client
+    # Attempt 1: from chuk_mcp.streamable_http
+    from chuk_mcp.streamable_http import streamablehttp_client
 except ImportError:
     try:
-        # Attempt 2: from mcp.client.http (common pattern for http clients)
-        from mcp.client.http import streamablehttp_client
+        # Attempt 2: from chuk_mcp directly
+        from chuk_mcp import streamablehttp_client
     except ImportError:
         try:
-            # Attempt 3: Original first path
-            from mcp.client.streamable_http import streamablehttp_client
+            # Attempt 3: from chuk_mcp.client.streamable_http (original suggestion that failed on chuk_mcp.client)
+            from chuk_mcp.client.streamable_http import streamablehttp_client
         except ImportError:
-            try:
-                # Attempt 4: Original second path
-                from mcp.client import streamablehttp_client
-            except ImportError:
-                try:
-                    # Attempt 5: Original third path
-                    from mcp import streamablehttp_client
-                except ImportError:
-                    raise ImportError(
-                        "Could not import streamablehttp_client from common locations (chuk_mcp.client.streamable_http, mcp.client.http, mcp.client.streamable_http, mcp.client, or mcp). "
-                        "Make sure you have installed necessary packages like 'mcp[cli]' and 'chuk-mcp', and that 'streamablehttp_client' is available in one of these paths."
-                    )
+            # If all attempts to import from chuk_mcp fail, raise an error.
+            raise ImportError(
+                "Could not import streamablehttp_client from chuk_mcp (tried chuk_mcp.streamable_http, chuk_mcp, chuk_mcp.client.streamable_http). "
+                "Please ensure 'chuk-mcp' is installed correctly and 'streamablehttp_client' is available in one of these paths within the 'chuk_mcp' package."
+            )
 
 # Import types - these should be in mcp.types according to the docs
 try:
