@@ -93,24 +93,20 @@ app = FastAPI(lifespan=lifespan)
 
 @app.middleware("http")
 async def log_requests_middleware(request: Request, call_next):
+    logger.critical(f"@@@ REQUEST MIDDLEWARE HIT @@@ Method: {request.method}, Path: {request.url.path}, Client: {request.client.host}") # New prominent log
     start_time = time.time()
-    client_ip = request.client.host
-    method = request.method
-    url = str(request.url)
-    path = request.url.path
     query_params = str(request.query_params)
     
-    # Log the incoming request
-    logger.info(f"Request started: {method} {path} from {client_ip} | Query: {query_params}")
+    logger.info(f"Request started: {request.method} {request.url.path} from {request.client.host} | Query: {query_params}")
     
     try:
         response = await call_next(request)
         process_time = time.time() - start_time
-        logger.debug(f"Request completed: {method} {path} | Status: {response.status_code} | Time: {process_time:.2f}s")
+        logger.debug(f"Request completed: {request.method} {request.url.path} | Status: {response.status_code} | Time: {process_time:.2f}s")
         return response
     except Exception as e:
         process_time = time.time() - start_time
-        logger.error(f"Request failed: {method} {path} | Error: {str(e)} | Time: {process_time:.2f}s")
+        logger.error(f"Request failed: {request.method} {request.url.path} | Error: {str(e)} | Time: {process_time:.2f}s")
         raise
 
 # Define allowed origins based on environment
