@@ -546,6 +546,32 @@ def main():
         for tool_spec in tools_api_keys:
             if tool_spec['key'] in global_config:
                 env_vars[tool_spec['key']] = global_config[tool_spec['key']]
+
+        print_color("\n--- Environment variables to be written to .env ---", Colors.HEADER)
+        sensitive_keywords = ["KEY", "TOKEN", "PASSWORD", "SECRET"] # Keywords to identify sensitive vars
+
+        # Determine max key length for alignment
+        max_key_length = 0
+        if env_vars: # Check if env_vars is not empty
+            max_key_length = max(len(k) for k in env_vars.keys())
+
+        for k, v in env_vars.items():
+            display_value = str(v)
+            is_sensitive = any(keyword in k.upper() for keyword in sensitive_keywords)
+
+            if v is None: # Explicitly show None as <Not Set>
+                display_value = "<Not Set>"
+            elif is_sensitive and v: # Mask non-empty sensitive values
+                if len(display_value) > 8:
+                    display_value = f"{display_value[:4]}****{display_value[-4:]}"
+                else:
+                    display_value = "****"
+
+            # Align output
+            print_color(f"  {k:<{max_key_length}} : {display_value}", Colors.OKCYAN)
+        print_color("--- End of .env preview ---", Colors.HEADER)
+
+        # Existing code to write to .env file
         env_lines = [f"{k}={v}" for k, v in env_vars.items() if v is not None]
         with open(".env", "w") as f:
             f.write("\n".join(env_lines) + "\n")
