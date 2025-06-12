@@ -176,6 +176,7 @@ class Configuration:
     
     def __init__(self):
         """Initialize configuration by loading from environment variables."""
+        print("DEBUG: backend.utils.config.Configuration.__init__ started")
         # Load environment variables from .env file if it exists
         load_dotenv()
         
@@ -187,6 +188,7 @@ class Configuration:
             logger.warning(f"Invalid ENV_MODE: {env_mode_str}, defaulting to LOCAL")
             self.ENV_MODE = EnvMode.LOCAL
             
+        print(f"DEBUG: backend.utils.config.Configuration - ENV_MODE determined as {self.ENV_MODE.value}")
         logger.info(f"Environment mode: {self.ENV_MODE.value}")
         
         # Load configuration from environment variables
@@ -235,6 +237,7 @@ class Configuration:
         
         if missing_fields:
             error_msg = f"Missing required configuration fields: {', '.join(missing_fields)}"
+            print(f"DEBUG: backend.utils.config.Configuration._validate - Raising ValueError: {error_msg}")
             logger.error(error_msg)
             raise ValueError(error_msg)
     
