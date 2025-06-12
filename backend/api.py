@@ -46,6 +46,26 @@ MAX_CONCURRENT_IPS = 25
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(f"Starting up FastAPI application with instance ID: {instance_id} in {config.ENV_MODE.value} mode")
+    logger.info("--- Critical Backend Configuration ---")
+    logger.info(f"ENV_MODE: {config.ENV_MODE.value}")
+    logger.info(f"SUPABASE_URL: {config.SUPABASE_URL}")
+
+    anon_key = config.SUPABASE_ANON_KEY
+    if anon_key and len(anon_key) > 12:
+        masked_anon_key = f"{anon_key[:8]}****{anon_key[-4:]}"
+    elif anon_key:
+        masked_anon_key = "****"
+    else:
+        masked_anon_key = "<Not Set>"
+    logger.info(f"SUPABASE_ANON_KEY: {masked_anon_key}")
+
+    service_role_key = config.SUPABASE_SERVICE_ROLE_KEY
+    # Log status, not the key itself even masked for extra safety
+    logger.info(f"SUPABASE_SERVICE_ROLE_KEY (Status): {'Set' if service_role_key else '<Not Set>'}")
+
+    next_public_api_url = os.getenv("NEXT_PUBLIC_API_URL")
+    logger.info(f"NEXT_PUBLIC_API_URL (from os.getenv): {next_public_api_url if next_public_api_url else '<Not Set in backend env>'}")
+    logger.info("--- End of Critical Backend Configuration ---")
     try:
         await db.initialize()
         
