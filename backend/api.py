@@ -1,3 +1,4 @@
+print("DEBUG: backend.api.py - Top-level execution started")
 import sys, os
 # Esto añade el directorio raíz del proyecto a la ruta de búsqueda de Python
 # para solucionar los ModuleNotFoundError.
@@ -12,6 +13,7 @@ from services.supabase import DBConnection
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 from utils.config import config, EnvMode
+print(f"DEBUG: backend.api.py - Imported config. ENV_MODE is {config.ENV_MODE.value if config else 'config_not_loaded'}")
 import asyncio
 from utils.logger import logger
 import time
@@ -43,8 +45,10 @@ instance_id = "single"
 ip_tracker = OrderedDict()
 MAX_CONCURRENT_IPS = 25
 
+print("DEBUG: backend.api.py - Lifespan function definition started")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    print("DEBUG: backend.api.py - Lifespan async context manager entered")
     logger.info(f"Starting up FastAPI application with instance ID: {instance_id} in {config.ENV_MODE.value} mode")
     logger.info("--- Critical Backend Configuration ---")
     logger.info(f"ENV_MODE: {config.ENV_MODE.value}")
@@ -67,6 +71,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"NEXT_PUBLIC_API_URL (from os.getenv): {next_public_api_url if next_public_api_url else '<Not Set in backend env>'}")
     logger.info("--- End of Critical Backend Configuration ---")
     try:
+        print("DEBUG: backend.api.py - Lifespan: About to await db.initialize()")
         await db.initialize()
         
         agent_api.initialize(
@@ -109,7 +114,9 @@ async def lifespan(app: FastAPI):
         logger.error(f"Error during application startup: {e}")
         raise
 
+print("DEBUG: backend.api.py - FastAPI app instantiation started")
 app = FastAPI(lifespan=lifespan)
+print("DEBUG: backend.api.py - FastAPI app instantiated")
 
 @app.middleware("http")
 async def log_requests_middleware(request: Request, call_next):
